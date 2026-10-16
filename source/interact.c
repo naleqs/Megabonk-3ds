@@ -258,6 +258,18 @@ void microwave_use(int slot)
 	audio_play_sfx(SFX_PURCHASE);
 }
 
+// Solid interactables take part in world collision (walls below the top, floor on top).
+bool interact_solid(int i, float* radius, float* top)
+{
+	const Interactable* it = &g.interact[i];
+	const InteractDef* d = &s_defs[it->kind];
+	if (!it->active || d->collide <= 0) return false;
+	const Mesh* m = g.interactMeshes[it->kind];
+	*radius = d->collide;
+	*top = m ? m->maxy * d->scale : 2.0f;
+	return true;
+}
+
 void interact_update(float dt)
 {
 	g.nearInteract = -1;
@@ -267,12 +279,6 @@ void interact_update(float dt)
 		if (!it->active) continue;
 		const InteractDef* d = &s_defs[it->kind];
 		float d2 = dist2_xz(it->pos, g.pos);
-
-		if (d->collide > 0 && d2 < (d->collide + 0.9f) * (d->collide + 0.9f) && d2 > 1e-4f) {
-			float dist = sqrtf(d2), rr = d->collide + 0.9f;
-			g.pos.x = it->pos.x + (g.pos.x - it->pos.x) / dist * rr;
-			g.pos.z = it->pos.z + (g.pos.z - it->pos.z) / dist * rr;
-		}
 
 		if (it->kind == INT_SHRINE_CHARGE) {
 			if (it->used) continue;

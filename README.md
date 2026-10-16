@@ -52,6 +52,8 @@ and don't upload or share it.
   (a new enemy type joins every minute once its spawn time has passed; minibosses and swarms on the
   game's schedule; the Final Swarm's ghosts turn black, purple and red the longer you stay)
 - All 21 characters with their animations, starting weapons and passive abilities
+  (Calcium rides his skateboard with momentum, Monke climbs rocks, trees and shrines, Birdo floats)
+- Rocks, trees, houses and shrines are solid: you can jump on top of them
 - All 30 weapons. Base damage, knockback, crit chance, projectile count, bounces, cooldown and the
   level-up stat lines are read from the game's own weapon data
 - 22 tomes, including Shield, Thorns, Bloody, Knockback, Golden, Duration, Cursed and Chaos
@@ -64,7 +66,7 @@ and don't upload or share it.
 Item, tome and passive numbers that aren't stored in the game's data files (they live in compiled
 code) follow the [megabonk.org database](https://megabonk.org/database/) where it lists them, and are
 estimated otherwise. Not in the port yet: Wizard's Hat, Beacon and Pumpkin (they need tome level caps
-or later stages), Monke's wall climb, the Scythe's charged attack, saves and unlocks.
+or later stages), the Scythe's charged attack, saves and unlocks.
 
 [中文说明](README.zh-CN.md)
 

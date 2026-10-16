@@ -58,7 +58,8 @@ WEAPON_ENUM = {
 }
 # baked animations: (name, clip-name keywords, fps, loop, max frames)
 CHAR_ANIMS = [("idle", ("idle",), 6, True, 40), ("run", ("run", "walk", "move", "cruise", "skat"), 12, True, 24),
-              ("jump", ("jump",), 12, False, 14)]
+              ("jump", ("jump",), 12, False, 14),
+              ("push", ("push",), 12, True, 16)]   # Calcium kicking his skateboard (others don't have one)
 
 # UI images: Texture2D name -> (output name, display width in pixels)
 UI_IMAGES = {"MegabonkLogo": ("ui_logo", 360)}

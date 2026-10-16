@@ -226,7 +226,7 @@ bool attacks_enemy_update(int idx, float dt)
 	return true;
 }
 
-static bool player_hittable(void) { return g.pos.y < 2.5f; }   // jumping clears ground attacks
+static bool player_hittable(void) { return g.pos.y - g.groundY < 2.5f; }   // jumping clears ground attacks
 
 static float seg_dist2(vec3 a, vec3 b, vec3 p)
 {

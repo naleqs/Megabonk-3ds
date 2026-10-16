@@ -210,6 +210,7 @@ void game_new_run(int character, int stage)
 	g.bossIndex = -1;
 	g.swarmEnemy = -1;
 	g.wKnock = 1;
+	g.skateYaw = 0;
 
 	weapons_init_slot(&g.weapons[0], g_characters[character].startWeapon);
 	g.numWeapons = 1;
@@ -228,6 +229,13 @@ void game_new_run(int character, int stage)
 	g.passiveTimer[2] = 60.0f;   // Hoarder's first free chest
 	passive_init();
 #ifdef MB_DEBUG_START_TIME
+	// dev builds: a boulder straight ahead of the spawn (climbing / standing-on-props tests)
+	for (int i = 0; i < g.numProps; i++)
+		if (strstr(g_propDefs[g.props[i].def].mesh, "boulder") && g.props[i].colRadius > 0) {
+			Prop* p = &g.props[i];
+			p->pos = v3(0, 0, 4 + p->colRadius);
+			break;
+		}
 	g.time = MB_DEBUG_START_TIME;
 	g.stats.maxHp = g.hp = 100000;
 	g.gold = 500;
@@ -906,20 +914,41 @@ static void player_update(float dt)
 	vec3 fwd = dir_of_yaw(g.camYaw), right = v3(cosf(g.camYaw), 0, -sinf(g.camYaw));
 	vec3 wish = v3_add(v3_scale(fwd, iz), v3_scale(right, ix));
 	float speed = 8.5f * g.stats.moveSpeed * items_speed_mult();
-	if (passive_current() == PASSIVE_SPEEDDEMON) speed *= 1.0f + 0.5f * g.speedDemon;
-	float accel = g.grounded ? 14.0f : 5.0f;
-	float t = clampf(accel * dt, 0, 1);
-	g.vel.x = lerpf(g.vel.x, wish.x * speed, t);
-	g.vel.z = lerpf(g.vel.z, wish.z * speed, t);
-
-	if (mag > 0.1f) {
-		g.yaw += angle_diff(g.yaw, yaw_of(wish)) * clampf(dt * 12, 0, 1);
-		g.moveAnim += dt * mag * 10.0f;
+	PassiveId passive = passive_current();
+	if (passive == PASSIVE_SPEEDDEMON) {
+		// Calcium rides a skateboard: push to build speed, carve to turn, coast when you let go
+		speed *= 1.15f + 0.5f * g.speedDemon;
+		if (mag > 0.1f) {
+			float turn = (g.grounded ? 3.2f : 1.2f) * dt;
+			g.skateYaw += clampf(angle_diff(g.skateYaw, yaw_of(wish)), -turn, turn);
+			float want = speed * mag;
+			g.skatePush = g.grounded && g.skateSpeed < want * 0.85f;
+			float accel = g.grounded ? 9.0f : 1.5f;
+			if (g.skateSpeed < want) g.skateSpeed = fminf(want, g.skateSpeed + accel * dt);
+			else g.skateSpeed = fmaxf(want, g.skateSpeed - 4.0f * dt);
+		} else {
+			g.skatePush = false;
+			g.skateSpeed *= expf(-(g.grounded ? 0.9f : 0.1f) * dt);   // rolls to a stop
+		}
+		vec3 d = dir_of_yaw(g.skateYaw);
+		g.vel.x = d.x * g.skateSpeed;
+		g.vel.z = d.z * g.skateSpeed;
+		g.yaw = g.skateYaw;
+		g.moveAnim += dt * (2.0f + g.skateSpeed);
 	} else {
-		g.moveAnim += dt * 2.0f;
+		float accel = g.grounded ? 14.0f : 5.0f;
+		float t = clampf(accel * dt, 0, 1);
+		g.vel.x = lerpf(g.vel.x, wish.x * speed, t);
+		g.vel.z = lerpf(g.vel.z, wish.z * speed, t);
+		if (mag > 0.1f) {
+			g.yaw += angle_diff(g.yaw, yaw_of(wish)) * clampf(dt * 12, 0, 1);
+			g.moveAnim += dt * mag * 10.0f;
+		} else {
+			g.moveAnim += dt * 2.0f;
+		}
 	}
 
-	if (g.grounded) g.jumpsLeft = items_max_jumps();
+	if (g.grounded || g.climbing) g.jumpsLeft = items_max_jumps();
 	// animation clocks: run cycle speed follows movement speed
 	float hspeed = sqrtf(g.vel.x * g.vel.x + g.vel.z * g.vel.z);
 	g.animTime += dt * (hspeed > 1.0f ? clampf(hspeed / 8.5f, 0.6f, 1.8f) : 1.0f);
@@ -927,6 +956,12 @@ static void player_update(float dt)
 
 	if ((down & (KEY_A | KEY_B)) && g.jumpsLeft > 0) {
 		g.vel.y = JUMP_VEL * items_jump_mult() * passive_jump_mult();
+		if (g.climbing) {   // wall jump: kick off the wall
+			vec3 back = dir_of_yaw(g.yaw + (float)M_PI);
+			g.vel.x = back.x * 8; g.vel.z = back.z * 8;
+			g.skateYaw = g.yaw + (float)M_PI;
+			g.climbing = false;
+		}
 		g.grounded = false;
 		g.jumpsLeft--;
 		g.jumpTime = 0;
@@ -936,12 +971,34 @@ static void player_update(float dt)
 	float fall = passive_fall_limit();   // Float / Hoarder: hold jump to glide
 	if (fall > 0 && !g.grounded && (held & (KEY_A | KEY_B)) && g.vel.y < -fall) g.vel.y = -fall;
 	g.pos = v3_add(g.pos, v3_scale(g.vel, dt));
-	if (g.pos.y <= 0) {
-		g.pos.y = 0;
-		g.vel.y = 0;
-		g.grounded = true;
+
+	// props are solid: walls below their top, floors on top
+	int wall = world_collide(&g.pos, PLAYER_RADIUS);
+	g.climbing = false;
+	if (wall >= 0 && passive == PASSIVE_MONKEGRIP && mag > 0.3f) {
+		// Monke Grip: pushing into a wall climbs it
+		vec3 c;
+		float r, top;
+		world_solid(wall, &c, &r, &top);
+		vec3 toWall = v3_norm(v3(c.x - g.pos.x, 0, c.z - g.pos.z));
+		if (wish.x * toWall.x + wish.z * toWall.z > 0.3f) {
+			g.climbing = true;
+			g.vel.y = 9.0f;
+			if (g.pos.y > top - 1.2f) {   // mantle onto the top
+				g.vel.x = toWall.x * 6; g.vel.z = toWall.z * 6;
+				g.pos = v3_add(g.pos, v3_scale(toWall, 0.6f));
+			}
+		}
 	}
-	world_collide(&g.pos, PLAYER_RADIUS);
+	g.groundY = world_ground(g.pos, PLAYER_RADIUS);
+	if (g.pos.y <= g.groundY && g.vel.y <= 0) {
+		g.pos.y = g.groundY;
+		g.vel.y = 0;
+		if (!g.grounded) g.jumpTime = 0;
+		g.grounded = true;
+	} else if (g.pos.y > g.groundY + 0.05f) {
+		g.grounded = false;   // walked off a ledge
+	}
 	g.pos.x = clampf(g.pos.x, -MAP_HALF + 1, MAP_HALF - 1);
 	g.pos.z = clampf(g.pos.z, -MAP_HALF + 1, MAP_HALF - 1);
 

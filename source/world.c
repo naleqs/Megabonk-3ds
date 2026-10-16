@@ -107,6 +107,13 @@ void world_generate(void)
 			p->yaw = randf() * 6.2832f;
 			p->scale = randrange(g_propDefs[d].scaleMin, g_propDefs[d].scaleMax);
 			p->colRadius = prop_collision_radius(d, p->scale);
+			const Mesh* mesh = g.propMeshes[d];
+			p->top = mesh ? mesh->maxy * p->scale : 0;
+			p->topRadius = p->colRadius;
+			if (mesh && strstr(g_propDefs[d].mesh, "tree")) {   // stand on the canopy, not the trunk
+				p->top *= 0.92f;
+				p->topRadius = fmaxf(p->colRadius, mesh->radius * p->scale * 0.45f);
+			}
 			g.numProps++;
 		}
 	}
@@ -121,20 +128,55 @@ void world_clear_area(vec3 pos, float radius)
 	}
 }
 
-void world_collide(vec3* pos, float radius)
+// Solids: props first (index < numProps), then interactables.
+bool world_solid(int i, vec3* pos, float* radius, float* top)
 {
-	for (int i = 0; i < g.numProps; i++) {
-		Prop* p = &g.props[i];
-		if (p->colRadius <= 0) continue;
-		float rr = p->colRadius + radius;
-		float dx = pos->x - p->pos.x, dz = pos->z - p->pos.z;
+	if (i < g.numProps) {
+		const Prop* p = &g.props[i];
+		if (p->colRadius <= 0) return false;
+		*pos = p->pos;
+		*radius = p->colRadius;
+		*top = p->top;
+		return true;
+	}
+	i -= g.numProps;
+	if (!interact_solid(i, radius, top)) return false;
+	*pos = g.interact[i].pos;
+	return true;
+}
+
+int world_collide(vec3* pos, float radius)
+{
+	int hit = -1;
+	for (int i = 0; i < g.numProps + g.numInteract; i++) {
+		vec3 c;
+		float r, top;
+		if (!world_solid(i, &c, &r, &top) || pos->y >= top - 0.3f) continue;   // above it: no wall
+		float rr = r + radius;
+		float dx = pos->x - c.x, dz = pos->z - c.z;
 		float d2 = dx * dx + dz * dz;
 		if (d2 >= rr * rr) continue;
 		float d = sqrtf(d2);
 		if (d < 1e-3f) { dx = 1; dz = 0; d = 1; }
-		pos->x = p->pos.x + dx / d * rr;
-		pos->z = p->pos.z + dz / d * rr;
+		pos->x = c.x + dx / d * rr;
+		pos->z = c.z + dz / d * rr;
+		hit = i;
 	}
+	return hit;
+}
+
+float world_ground(vec3 pos, float radius)
+{
+	float best = 0;
+	for (int i = 0; i < g.numProps + g.numInteract; i++) {
+		vec3 c;
+		float r, top;
+		if (!world_solid(i, &c, &r, &top) || top <= best || pos.y < top - 0.8f) continue;
+		if (i < g.numProps) r = g.props[i].topRadius;
+		float rr = r + radius * 0.5f;
+		if (dist2_xz(pos, c) < rr * rr) best = top;
+	}
+	return best;
 }
 
 // true if the prop blocks the line from the camera to the player

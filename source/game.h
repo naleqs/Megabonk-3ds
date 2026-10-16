@@ -207,6 +207,8 @@ typedef struct {
 	vec3 pos;
 	float yaw, scale;
 	float colRadius; // 0 = no collision
+	float top;       // height of its top surface (you can stand on it)
+	float topRadius; // standable radius at the top
 } Prop;
 
 // ---------------------------------------------------------------- level up
@@ -271,6 +273,10 @@ typedef struct {
 	vec3 pos, vel;
 	float yaw;           // facing
 	bool grounded;
+	float groundY;       // surface height under the player (props can be stood on)
+	bool climbing;       // Monke Grip: on a wall
+	float skateYaw, skateSpeed;   // Calcium rides a skateboard
+	bool skatePush;
 	float hp;
 	float shield;
 	float shieldDelay;   // seconds until the shield starts refilling
@@ -445,6 +451,7 @@ int  weapons_orbiters(vec3* out, int max);   // Chunkers rock positions (for dra
 
 // interact.c
 void interact_generate(void);
+bool interact_solid(int i, float* radius, float* top);
 void interact_update(float dt);
 void interact_use(void);           // X pressed
 void interact_draw(vec3 camPos, vec3 camFwd);
@@ -457,7 +464,9 @@ void microwave_use(int ownedSlot);
 // world.c
 void world_generate(void);
 void world_clear_area(vec3 pos, float radius);
-void world_collide(vec3* pos, float radius);
+int  world_collide(vec3* pos, float radius);       // pushes out of solids below pos.y; returns the solid hit or -1
+bool world_solid(int i, vec3* pos, float* radius, float* top);   // solid i (props, then interactables)
+float world_ground(vec3 pos, float radius);       // height of the surface under pos (0 or a prop top)
 void world_draw(vec3 camPos, vec3 camFwd);
 
 // draw.c

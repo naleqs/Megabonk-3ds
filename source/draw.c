@@ -112,7 +112,7 @@ static void draw_shadow(vec3 pos, float r)
 {
 	C3D_Mtx m;
 	Mtx_Identity(&m);
-	Mtx_Translate(&m, pos.x, 0.05f, pos.z, true);
+	Mtx_Translate(&m, pos.x, pos.y + 0.05f, pos.z, true);
 	Mtx_Scale(&m, r, 0.01f, r);
 	render_mesh(&g_meshSphere, 0, &m, (Color){ 0, 0, 0, 0.35f }, NO_EMIT);
 }
@@ -151,9 +151,12 @@ static void draw_player(void)
 	Mesh* mesh = g.charMesh;
 	float hspeed = sqrtf(g.vel.x * g.vel.x + g.vel.z * g.vel.z);
 	int idle = mesh_find_anim(mesh, "idle"), run = mesh_find_anim(mesh, "run"), jump = mesh_find_anim(mesh, "jump");
+	int push = mesh_find_anim(mesh, "push");
 	int anim = idle;
 	float t = g.animTime;
-	if (!g.grounded && jump >= 0) { anim = jump; t = g.jumpTime; }
+	if (g.climbing && run >= 0) { anim = run; t = g.realTime * 1.5f; }   // scramble up the wall
+	else if (!g.grounded && jump >= 0) { anim = jump; t = g.jumpTime; }
+	else if (g.skatePush && push >= 0) anim = push;                      // Calcium kicking the board
 	else if (hspeed > 1.5f && run >= 0) anim = run;
 
 	// characters without a run clip still get a little bob
@@ -477,7 +480,7 @@ void draw_scene(C3D_RenderTarget* top)
 		return;
 	}
 	interact_draw(s_camPos, s_camFwd);
-	draw_shadow(g.pos, 1.3f);
+	draw_shadow(v3(g.pos.x, g.groundY, g.pos.z), 1.3f);
 	draw_player();
 	draw_enemies();
 	draw_pickups();
@@ -723,6 +726,10 @@ static void draw_bottom_playing(void)
 	ui_text(buf, 8, 3, 0.65f, GOLD, 0, true);
 	snprintf(buf, sizeof(buf), "%d fps", (int)(g_fps + 0.5f));
 	ui_text(buf, 214, 4, 0.4f, HINT, C2D_AlignRight, false);
+#ifdef MB_DEBUG_START_TIME
+	snprintf(buf, sizeof(buf), "y %.1f gnd %.1f %s%s", g.pos.y, g.groundY, g.climbing ? "CLIMB " : "", g.grounded ? "G" : "");
+	ui_text(buf, 214, 16, 0.4f, HINT, C2D_AlignRight, false);
+#endif
 
 	// weapons + tomes as icon slots, like the game's HUD
 	for (int i = 0; i < MAX_WEAPON_SLOTS; i++) {
