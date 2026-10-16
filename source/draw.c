@@ -220,7 +220,14 @@ static void draw_projectiles(void)
 			render_mesh_at(&g_meshSphere, 0, p->pos, 0, 0.55f * p->size, COLOR(1, 0.45f, 0.1f), (Color){ 1, 0.5f, 0.1f, 0 });
 			break;
 		case PROJ_BULLET:
+		case PROJ_PELLET:
 			render_mesh_at(&g_meshSphere, 0, p->pos, 0, 0.22f, COLOR(1, 0.9f, 0.4f), (Color){ 1, 0.9f, 0.3f, 0 });
+			break;
+		case PROJ_WAVE:
+			Mtx_RotateY(&m, yaw, true);
+			Mtx_RotateZ(&m, (float)M_PI / 2, true);
+			Mtx_Scale(&m, 1.1f * p->size, 1.1f * p->size, 1.1f * p->size);
+			render_mesh(g.meshSword, 0, &m, (Color){ 1, 0.95f, 0.6f, 0.8f }, (Color){ 0.6f, 0.55f, 0.2f, 0 });
 			break;
 		case PROJ_SOUL:
 			render_mesh_at(&g_meshSphere, 0, p->pos, 0, 0.35f, COLOR(0.7f, 0.9f, 1), (Color){ 0.6f, 0.8f, 1, 0 });
@@ -229,14 +236,16 @@ static void draw_projectiles(void)
 			render_mesh_at(&g_meshSphere, 0, p->pos, 0, 0.45f, COLOR(0.3f, 1, 0.9f), (Color){ 0.2f, 0.9f, 0.8f, 0 });
 			break;
 		case PROJ_ROCKET:
+		case PROJ_MISSILE:
 		case PROJ_SPIKE: {
 			// cone primitive points along +Z: aim it along the velocity
 			vec3 v = v3_norm(p->vel);
 			Mtx_RotateY(&m, yaw, true);
 			Mtx_RotateX(&m, -asinf(clampf(v.y, -1, 1)), true);
-			float s = p->kind == PROJ_ROCKET ? 0.45f : 0.25f;
+			float s = p->kind == PROJ_SPIKE ? 0.25f : 0.45f;
 			Mtx_Scale(&m, s, s, s * 3);
-			Color c = p->kind == PROJ_ROCKET ? COLOR(1, 0.5f, 0.2f) : COLOR(0.4f, 0.8f, 0.3f);
+			Color c = p->kind == PROJ_ROCKET ? COLOR(1, 0.5f, 0.2f) : p->kind == PROJ_MISSILE ? COLOR(1, 0.45f, 0.75f)
+			        : COLOR(0.4f, 0.8f, 0.3f);
 			render_mesh(&g_meshCone, 0, &m, c, (Color){ c.r * 0.5f, c.g * 0.5f, c.b * 0.5f, 0 });
 			break;
 		}
@@ -328,6 +337,19 @@ static void draw_fx(void)
 			render_mesh(&g_meshCylinder, 0, &m, c, (Color){ 0.6f, 0.9f, 1, 0 });
 			render_mesh_at(&g_meshRing, 0, v3_add(f->pos, v3(0, 0.15f, 0)), 0, f->size, c, emit);
 			break;
+		case FX_BEAM: {
+			// a wobbly noodle: a row of blobs from pos along yaw
+			vec3 d = dir_of_yaw(f->yaw);
+			int n = (int)(f->size / 0.9f) + 1;
+			if (n > 24) n = 24;
+			for (int k = 0; k <= n; k++) {
+				float u = (float)k / n;
+				float w = sinf(u * 9.0f + g.realTime * 14.0f) * 0.35f * (1 - u) * u * 4;
+				vec3 at = v3(f->pos.x + d.x * f->size * u + d.z * w, f->pos.y - u * 1.0f, f->pos.z + d.z * f->size * u - d.x * w);
+				render_mesh_at(&g_meshSphere, 0, at, 0, 0.32f, c, emit);
+			}
+			break;
+		}
 		case FX_SLASH:
 		case FX_SPIN: {
 			float a = f->kind == FX_SPIN ? f->yaw + t * 6.2832f : f->yaw + lerpf(-1.2f, 1.2f, t);
@@ -373,6 +395,24 @@ static void draw_fx(void)
 			Mtx_Scale(&m, z->radius * 1.5f, 4.0f, z->radius * 1.5f);
 			render_mesh(&g_meshCylinder, 0, &m, (Color){ 0.85f, 0.9f, 0.95f, 0.25f * fade }, (Color){ 0.3f, 0.3f, 0.3f, 0 });
 			break;
+		case ZONE_FIRE: {
+			float flick = 0.85f + 0.15f * sinf(g.realTime * 20 + i);
+			Mtx_Identity(&m);
+			Mtx_Translate(&m, z->pos.x, 0.1f, z->pos.z, true);
+			Mtx_Scale(&m, z->radius * flick, 0.5f * flick, z->radius * flick);
+			render_mesh(&g_meshSphere, 0, &m, (Color){ 1, 0.45f, 0.08f, 0.55f * fade }, (Color){ 0.9f, 0.35f, 0.05f, 0 });
+			break;
+		}
+		case ZONE_MINE: {
+			bool blink = z->age < 0.5f || fmodf(z->age, 0.8f) < 0.15f;
+			Mtx_Identity(&m);
+			Mtx_Translate(&m, z->pos.x, 0.15f, z->pos.z, true);
+			Mtx_Scale(&m, 0.7f, 0.3f, 0.7f);
+			render_mesh(&g_meshSphere, 0, &m, (Color){ 0.25f, 0.25f, 0.28f, 1 }, NO_EMIT);
+			render_mesh_at(&g_meshSphere, 0, v3_add(z->pos, v3(0, 0.45f, 0)), 0, 0.18f,
+			               blink ? COLOR(1, 0.2f, 0.1f) : COLOR(0.4f, 0.05f, 0.05f), blink ? (Color){ 1, 0.1f, 0, 0 } : NO_EMIT);
+			break;
+		}
 		case ZONE_BLACKHOLE:
 			render_mesh_at(&g_meshSphere, 0, v3_add(z->pos, v3(0, 1.5f, 0)), 0, 1.2f, (Color){ 0.05f, 0, 0.1f, 0.95f }, NO_EMIT);
 			render_mesh_at(&g_meshRing, 0, v3_add(z->pos, v3(0, 0.2f, 0)), -g.realTime * 3, z->radius * (1.2f - fmodf(g.realTime, 1.0f) * 0.6f),
@@ -380,6 +420,12 @@ static void draw_fx(void)
 			break;
 		}
 	}
+
+	// Chunkers rocks
+	vec3 rocks[12];
+	int nr = weapons_orbiters(rocks, 12);
+	for (int k = 0; k < nr; k++)
+		render_mesh_at(&g_meshSphere, 0, rocks[k], g.realTime * 3 + k, 0.8f, COLOR(0.55f, 0.5f, 0.45f), NO_EMIT);
 
 	// aura weapon
 	for (int i = 0; i < g.numWeapons; i++) {
@@ -513,6 +559,8 @@ void draw_hud_top(void)
 
 	// hp
 	ui_bar(6, 224, 150, 10, g.hp / g.stats.maxHp, C2D_Color32(220, 40, 50, 255), C2D_Color32(50, 10, 10, 220));
+	if (g.stats.shieldMax > 0)
+		ui_bar(6, 218, 150, 4, g.shield / g.stats.shieldMax, C2D_Color32(90, 170, 255, 255), C2D_Color32(15, 25, 50, 220));
 	snprintf(buf, sizeof(buf), "%d / %d", (int)ceilf(g.hp), (int)g.stats.maxHp);
 	ui_text_shadow(buf, 81, 223, 0.4f, WHITE, C2D_AlignCenter, false);
 
@@ -589,11 +637,7 @@ void ui_describe_choice(const LevelChoice* c, char* title, size_t tn, char* desc
 		for (int s = 0; s < c->nstats; s++) {
 			char part[40];
 			WeaponStat st = c->stat[s];
-			if (st == STAT_PROJECTILES || st == STAT_BOUNCES)
-				snprintf(part, sizeof(part), "+%d %s", (int)c->amount[s], weapon_stat_name(st));
-			else
-				snprintf(part, sizeof(part), "%s%d%% %s", st == STAT_COOLDOWN ? "-" : "+",
-				         (int)(c->amount[s] * 100 + 0.5f), weapon_stat_name(st));
+			weapon_format_stat(st, c->amount[s], part, sizeof(part));
 			if (s) strncat(desc, ", ", dn - strlen(desc) - 1);
 			strncat(desc, part, dn - strlen(desc) - 1);
 		}
@@ -606,7 +650,7 @@ void ui_describe_choice(const LevelChoice* c, char* title, size_t tn, char* desc
 		else
 			snprintf(title, tn, "Shrine blessing");
 		float a = tome_amount(c->index, c->rarity);
-		snprintf(desc, dn, g_tomeDescs[c->index], tome_is_percent(c->index) ? a * 100 : a);
+		snprintf(desc, dn, g_tomeDescs[c->index], tome_display(c->index, a));
 		break;
 	}
 	}

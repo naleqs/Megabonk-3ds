@@ -109,11 +109,12 @@ static void use_one(int i)
 	switch (it->kind) {
 	case INT_CHEST:
 	case INT_CHEST_FREE: {
-		bool free = it->kind == INT_CHEST_FREE || randf() < 0.10f * items_count(ITEM_KEY);
+		bool free = it->kind == INT_CHEST_FREE || randf() < items_key_chance();
 		int price = chest_price();
 		if (!free && g.gold < price) { game_toast("Not enough gold"); return; }
 		if (!free) g.gold -= price;
 		g.chestsOpened++;
+		items_on_chest_open();
 		it->active = false;
 		interact_open_item(items_roll(items_roll_tier(it->kind == INT_CHEST_FREE ? 0.05f : 0)), NULL);
 		break;
@@ -206,7 +207,11 @@ static void use_one(int i)
 
 void interact_use(void)
 {
-	if (g.nearInteract >= 0) use_one(g.nearInteract);
+	if (g.nearInteract < 0) return;
+	Interactable* it = &g.interact[g.nearInteract];
+	bool wasActive = it->active, wasUsed = it->used;
+	use_one(g.nearInteract);
+	if ((wasActive && !it->active) || (!wasUsed && it->used)) items_on_interact();   // Ghost
 }
 
 int shop_price(const Interactable* it, int slot)
@@ -272,12 +277,13 @@ void interact_update(float dt)
 		if (it->kind == INT_SHRINE_CHARGE) {
 			if (it->used) continue;
 			bool inside = d2 < d->range * d->range;
-			float rate = (1.0f + 0.25f * items_count(ITEM_WRENCH)) / CHARGE_TIME;
+			float rate = (1.0f + 0.04f * items_count(ITEM_WRENCH)) / CHARGE_TIME;
 			float prev = it->progress;
 			it->progress = clampf(it->progress + (inside ? rate : -0.5f * rate) * dt, 0, 1);
 			if (inside && prev == 0 && it->progress > 0) audio_play_sfx(SFX_SHRINE);
 			if (it->progress >= 1) {
 				it->used = true;
+				items_on_interact();
 				game_roll_stat_choices(it->golden ? RARITY_EPIC : RARITY_UNCOMMON);
 				audio_play_sfx(SFX_LEVELUP);
 			}

@@ -95,8 +95,13 @@ EXTRA_PROPS = {
 # HUD icons: weapon icon textures (tomes/items are exported by name prefix/suffix)
 WEAPON_ICONS = {"Firestaff", "Aura", "Bone", "Sword", "Revolver", "LightningStaff", "Axe", "Dice",
                 "Poison Flask", "Aegis", "Dexecutioner", "Tornado", "Sniper", "CorruptedSword", "Bananarang",
-                "Katana", "Frostwalker", "Scythe", "Bow", "BlackHole", "Bluetooth Knife", "BloodMagic"}
-MISC_ICONS = {"icon_coin", "psd_Chest", "ProjectileSpeedTOme", "Balance Tome"}
+                "Katana", "Frostwalker", "Scythe", "Bow", "BlackHole", "Bluetooth Knife", "BloodMagic",
+                "Shotgun", "Mine", "SluttyRocket", "Space Noodle", "HeroSword", "Chunkers", "Firewalker",
+                "DragonsBreath"}
+MISC_ICONS = {"icon_coin", "psd_Chest", "ProjectileSpeedTOme", "BloodTOme", "Balance Tome",
+              # item icons whose texture names don't start with "Item"
+              "itemClover", "Bloody Cleaver", "Chonkplate", "Gasmask", "GrandmasSecretTonic", "IdleJuice",
+              "JoesDagger", "Kevin", "Speed boi", "ToxicBarrel", "Unstable Transfusion", "GamerLens"}
 
 EXTRA_TEXTURES = {"TopGrass12": "ground", "TopGrass2": "ground2", "sprite_0001": "grass",
                   "Cliffs": "cliffs"}

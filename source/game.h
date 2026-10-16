@@ -23,7 +23,8 @@
 typedef enum {
 	TOME_DAMAGE, TOME_COOLDOWN, TOME_AGILITY, TOME_HEALTH, TOME_REGEN, TOME_ARMOR,
 	TOME_EVASION, TOME_ATTRACTION, TOME_SIZE, TOME_QUANTITY, TOME_PRECISION, TOME_XP,
-	TOME_LUCK, TOME_PROJSPEED, TOME_COUNT
+	TOME_LUCK, TOME_PROJSPEED, TOME_SHIELD, TOME_THORNS, TOME_BLOODY, TOME_KNOCKBACK, TOME_GOLDEN,
+	TOME_DURATION, TOME_CURSED, TOME_CHAOS, TOME_COUNT
 } TomeId;
 
 typedef struct {
@@ -33,30 +34,47 @@ typedef struct {
 	float critChance, critMult, pickupRange, xpMult, luck, knockback;
 	float goldMult;
 	float thorns;
+	float shieldMax;    // absorbs damage first, refills after a few seconds without being hit
+	float overheal;     // healing can exceed Max HP by this fraction (Chonkplate)
+	float lifesteal;    // chance to heal 1 HP per hit
 } PlayerStats;
 
 // ---------------------------------------------------------------- weapons
 
-typedef enum { STAT_DAMAGE, STAT_COOLDOWN, STAT_PROJECTILES, STAT_SIZE, STAT_SPEED, STAT_DURATION, STAT_BOUNCES, STAT_COUNT } WeaponStat;
+// Weapon upgrade stats (UpgradeData). DAMAGE is flat, CRIT/CRITDMG add percentage points,
+// PROJECTILES/BOUNCES are counts, the rest are +x% multipliers.
+typedef enum {
+	STAT_DAMAGE, STAT_SIZE, STAT_DURATION, STAT_SPEED, STAT_PROJECTILES, STAT_BOUNCES,
+	STAT_CRIT, STAT_CRITDMG, STAT_KNOCKBACK, STAT_COUNT
+} WeaponStat;
+
+#define MAX_WEAPON_UPGRADES 6
+typedef struct { u8 stat; float amount; } WeaponUpgrade;
 
 typedef struct {
 	const char* name;
 	const char* desc;
-	float damage, cooldown;
-	int projectiles;
-	float size, speed, duration;
-	int bounces;
-	u32 upgradeMask; // which WeaponStats can roll on level-up
+	// from the game's WeaponData / UpgradeData
+	float damage, knockback, crit;
+	int projectiles, bounces;
+	float cooldown;
+	int nups;
+	WeaponUpgrade ups[MAX_WEAPON_UPGRADES];
+	// engine units (hand-tuned for this port)
+	float speed, duration;
 } WeaponDef;
 
 typedef struct {
 	WeaponId id;
 	int level;
 	float damage, cooldown, size, speed, duration;
+	float crit, critDmg, knockback;   // per-weapon bonuses on top of the player's stats
 	int projectiles, bounces;
 	float timer;
 	float burstTimer;
 	int burstLeft;
+	float orbit;                      // Chunkers: orbit angle / Flamewalker: trail timer
+	float tick;
 } Weapon;
 
 extern const WeaponDef g_weaponDefs[WEAPON_COUNT];
@@ -82,21 +100,27 @@ typedef struct {
 	float poisonTime, poisonDps;
 	float freezeTime;
 	bool noChest;        // challenge elites: the shrine pays out instead
-	bool marked;         // Bullseye passive: takes extra damage
+	bool marked;         // Bullseye passive: explodes on death
+	u8 bloodmarks;       // Bloodmark stacks (Unstable Transfusion / Bloody Cleaver)
+	float bloodTimer;
+	float launched;      // Eagle Claw: knocked into the air (stunned, counts as airborne)
+	u16 cursedTick;      // Cursed Doll: last curse tick that hit this enemy
 } Enemy;
 
 typedef enum {
 	PROJ_FIREBALL, PROJ_BONE, PROJ_BULLET, PROJ_AXE, PROJ_DICE,
 	PROJ_SOUL, PROJ_ROCKET, PROJ_ORB, PROJ_SPIKE,   // item projectiles (home in / no procs)
 	PROJ_FLASK, PROJ_BLADE, PROJ_SNIPE, PROJ_BANANA, PROJ_ARROW, PROJ_HOLE, PROJ_DAGGER,
+	PROJ_PELLET, PROJ_WAVE, PROJ_MISSILE,
 } ProjKind;
 
 // Lingering weapon areas
-typedef enum { ZONE_POISON, ZONE_TORNADO, ZONE_BLACKHOLE } ZoneKind;
-#define MAX_ZONES 24
+typedef enum { ZONE_POISON, ZONE_TORNADO, ZONE_BLACKHOLE, ZONE_FIRE, ZONE_MINE } ZoneKind;
+#define MAX_ZONES 40
 typedef struct {
 	bool active;
 	u8 kind;
+	u8 weapon;
 	vec3 pos, vel;
 	float radius, life, age, tick, damage;
 } Zone;
@@ -128,11 +152,13 @@ typedef struct {
 	vec3 pos;
 	float value;
 	float bob;
+	float hitCd;         // Shattered Knowledge: slice cooldown
 } Pickup;
 
 // FX_SLASH sweeps a blade across an arc (size = range, color tints the blade);
 // FX_SPIN sweeps it a full circle (scythe).
-typedef enum { FX_EXPLOSION, FX_RING, FX_SLASH, FX_LIGHTNING, FX_DEATH, FX_SPAWN, FX_LEVELUP, FX_POISON, FX_SPIN } FxKind;
+typedef enum { FX_EXPLOSION, FX_RING, FX_SLASH, FX_LIGHTNING, FX_DEATH, FX_SPAWN, FX_LEVELUP, FX_POISON, FX_SPIN, FX_BEAM } FxKind;
+// FX_BEAM: a line from pos along yaw, size = length
 
 typedef struct {
 	bool active;
@@ -220,6 +246,7 @@ typedef struct {
 	bool grounded;
 	float hp;
 	float shield;
+	float shieldDelay;   // seconds until the shield starts refilling
 	float iframes;
 	float hurtFlash;
 	int level;
@@ -235,11 +262,12 @@ typedef struct {
 	float animTime, jumpTime;   // character animation clocks
 	int jumpsLeft;
 	int aegisCharges;
+	float wCrit, wCritDmg, wKnock;   // damage context of the weapon currently hitting (weapons.c)
 
 	// passive ability state (passives.c)
 	float passiveTimer[4];
 	float speedDemon;     // Calcium: built-up speed bonus 0..1
-	float flexBuff;       // Megachad: damage buff time left
+	float flexBuff;       // Megachad: permanent damage bonus from flexing
 	float zapCharge;      // Tony: distance moved toward the next zap
 	int lastAttacker;     // enemy that last hit (or tried to hit) the player
 
@@ -248,8 +276,13 @@ typedef struct {
 	u8 itemOrder[MAX_OWNED_ITEMS];   // acquisition order for the HUD
 	int numItemKinds;
 	int killStacks;                  // Demonic Blood / Soul
-	float itemTimers[8];
-	float stillTime, movedDist;
+	float itemTimers[16];
+	float stillTime, movedDist, bobDist;
+	int cardChests;                  // chests opened (Credit Cards)
+	int joeStacks;                   // Joe's Dagger executes
+	bool phantomNext;                // Phantom Shroud: next hit deals 2x
+	float holyHeal;                  // Holy Book: healing banked toward the next pulse
+	u16 dollTick;
 
 	// camera
 	float camYaw, camPitch, camDist;
@@ -327,6 +360,8 @@ void game_poll_character(void);   // finishes background character loads (call o
 extern const char* const g_passiveNames[PASSIVE_COUNT];
 extern const char* const g_passiveDescs[PASSIVE_COUNT];
 PassiveId passive_current(void);
+void  passive_init(void);                   // start-of-run bonuses
+float passive_jump_mult(void);
 void  passive_on_level_up(void);
 void  passive_update(float dt);
 float passive_damage_mult(int enemyIdx);
@@ -354,6 +389,7 @@ void game_apply_choice(const LevelChoice* c);
 void game_roll_choices(void);
 float tome_amount(int tome, Rarity r);
 bool tome_is_percent(int tome);
+float tome_display(int tome, float amount);   // value for g_tomeDescs
 int  game_nearest_enemy(vec3 from, float maxDist, int exclude);
 Fx* fx_spawn(FxKind kind, vec3 pos, float size, float life, Color color);
 void game_toast(const char* msg);
@@ -366,7 +402,9 @@ void weapon_apply_upgrade(Weapon* w, WeaponStat stat, float amount);
 void zones_update(float dt);
 bool weapons_try_block(void);   // Aegis: true if an incoming hit was blocked
 const char* weapon_stat_name(WeaponStat s);
-float weapon_stat_roll(WeaponStat s, Rarity r);
+float weapon_stat_roll(WeaponId id, WeaponStat s, Rarity r);
+void weapon_format_stat(WeaponStat s, float amount, char* buf, size_t n);
+int  weapons_orbiters(vec3* out, int max);   // Chunkers rock positions (for drawing)
 
 // interact.c
 void interact_generate(void);

@@ -121,6 +121,15 @@ static bool handle_input(void)
 		if (down & KEY_ZL)
 			for (int i = 0; i < MAX_ENEMIES; i++)
 				if (g.enemies[i].active) game_damage_enemy_ex(i, 1e9f, v3(0, 0, 0), 0, DMG_NO_PROC | DMG_NO_CRIT);
+		// dev builds: Y swaps the last weapon slot to the next weapon and hands out 3 random items
+		if (down & KEY_Y) {
+			static int nextWeapon = WEAPON_SHOTGUN;
+			int slot = g.numWeapons < MAX_WEAPON_SLOTS ? g.numWeapons++ : MAX_WEAPON_SLOTS - 1;
+			weapons_init_slot(&g.weapons[slot], nextWeapon);
+			game_toast(g_weaponDefs[nextWeapon].name);
+			nextWeapon = (nextWeapon + 1) % WEAPON_COUNT;
+			for (int k = 0; k < 3; k++) items_give(rand() % ITEM_COUNT);
+		}
 		// dev builds: SELECT hops to the next interactable (for testing)
 		if (down & KEY_SELECT) {
 			static int nextKind;

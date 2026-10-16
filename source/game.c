@@ -9,18 +9,23 @@ Game g;
 const char* const g_tomeNames[TOME_COUNT] = {
 	"Damage Tome", "Cooldown Tome", "Agility Tome", "HP Tome", "Regen Tome", "Armor Tome",
 	"Evasion Tome", "Attraction Tome", "Size Tome", "Quantity Tome", "Precision Tome", "XP Tome",
-	"Luck Tome", "Projectile Speed Tome",
+	"Luck Tome", "Projectile Speed Tome", "Shield Tome", "Thorns Tome", "Bloody Tome", "Knockback Tome",
+	"Golden Tome", "Duration Tome", "Cursed Tome", "Chaos Tome",
 };
 const char* const g_tomeIcons[TOME_COUNT] = {
 	"icon_damagetome", "icon_cooldowntome", "icon_speedtome", "icon_healthtome", "icon_regenerationtome",
 	"icon_armortome", "icon_evasiontome", "icon_attractiontome", "icon_sizetome", "icon_quantitytome",
-	"icon_precisiontome", "icon_xptome", "icon_lucktome", "icon_projectilespeedtome",
+	"icon_precisiontome", "icon_xptome", "icon_lucktome", "icon_projectilespeedtome", "icon_shieldtome",
+	"icon_itemspikyshieldf", "icon_bloodtome", "icon_knockbacktome", "icon_goldentome", "icon_durationtome",
+	"icon_cursedtome", "icon_chaostome",
 };
 // printf formats taking the tome_amount() value
 const char* const g_tomeDescs[TOME_COUNT] = {
-	"+%.0f%% Damage", "+%.0f%% Attack speed", "+%.0f%% Movement speed", "+%.0f Max HP", "+%.2f HP/s regen",
-	"+%.0f%% Armor", "+%.0f%% Evasion", "+%.1f Pickup range", "+%.0f%% Size", "+%.0f Projectile",
-	"+%.0f%% Crit chance", "+%.0f%% XP gain", "+%.0f%% Luck", "+%.0f%% Projectile speed",
+	"+%.0f%% Damage", "+%.1f%% Attack speed", "+%.0f%% Movement speed", "+%.0f Max HP", "+%.0f HP regen/min",
+	"+%.0f%% Armor", "+%.0f%% Evasion", "+%.0f%% Pickup range", "+%.0f%% Size", "+%.0f Projectile",
+	"+%.0f%% Crit chance", "+%.0f%% XP gain", "+%.0f%% Luck", "+%.0f%% Projectile speed", "+%.0f Shield",
+	"+%.0f Thorns", "+%.0f%% Lifesteal", "+%.0f%% Knockback", "+%.0f%% Gold gain", "+%.0f%% Duration",
+	"+%.1f%% Difficulty", "Boost a random stat (x%.0f%%)",
 };
 
 static const float RARITY_MULT[RARITY_COUNT] = { 1.0f, 1.25f, 1.5f, 1.85f, 2.3f };
@@ -100,7 +105,17 @@ static float enemy_dmg_mult(void)
 
 void game_heal(float hp)
 {
-	g.hp = fminf(g.stats.maxHp, g.hp + hp);
+	float cap = g.stats.maxHp * (1.0f + g.stats.overheal);
+	float before = g.hp;
+	if (g.hp < cap) g.hp = fminf(cap, g.hp + hp);
+	items_on_heal(g.hp - before);
+}
+
+static void shield_update(float dt)
+{
+	if (g.stats.shieldMax <= 0) return;
+	if (g.shieldDelay > 0) g.shieldDelay -= dt;
+	else g.shield = fminf(g.stats.shieldMax, g.shield + g.stats.shieldMax * 0.25f * dt);
 }
 
 // ---------------------------------------------------------------- run setup
@@ -194,6 +209,7 @@ void game_new_run(int character, int stage)
 	g.rerolls = 2;
 	g.bossIndex = -1;
 	g.swarmEnemy = -1;
+	g.wKnock = 1;
 
 	weapons_init_slot(&g.weapons[0], g_characters[character].startWeapon);
 	g.numWeapons = 1;
@@ -209,7 +225,8 @@ void game_new_run(int character, int stage)
 	g.nextPoolTime = STAGE->newEnemyInterval;
 	g.credits = 3.0f;
 	g.lastAttacker = -1;
-	g.passiveTimer[2] = 90.0f;   // Hoarder's first free chest
+	g.passiveTimer[2] = 60.0f;   // Hoarder's first free chest
+	passive_init();
 #ifdef MB_DEBUG_START_TIME
 	g.time = MB_DEBUG_START_TIME;
 	g.stats.maxHp = g.hp = 100000;
@@ -311,7 +328,7 @@ static void spawn_group(int def, int count, float minR, float maxR)
 	vec3 c = game_random_spawn_point(minR, maxR);
 	float minutes = g.time / 60.0f;
 	for (int k = 0; k < count && g.numEnemies < MAX_ENEMIES - 4; k++) {
-		bool elite = randf() < 0.01f + minutes * 0.0025f;
+		bool elite = randf() < (0.01f + minutes * 0.0025f) * items_elite_mult();
 		vec3 p = v3_add(c, v3(randrange(-3, 3), 0, randrange(-3, 3)));
 		game_spawn_enemy(def, p, elite);
 	}
@@ -433,6 +450,11 @@ static void enemies_update(float dt)
 		if (e->hitFlash > 0) e->hitFlash -= dt;
 		if (e->attackCd > 0) e->attackCd -= dt;
 		if (e->freezeTime > 0) { e->freezeTime -= dt; continue; }
+		if (e->launched > 0) {   // Eagle Claw: tossed up, helpless until it lands
+			e->launched -= dt;
+			if (!(d->flags & ENEMY_FLYING)) e->pos.y = 3.0f * sinf(fmaxf(e->launched, 0) / 0.8f * (float)M_PI);
+			continue;
+		}
 
 		vec3 to = v3_sub(g.pos, e->pos);
 		to.y = 0;
@@ -586,20 +608,22 @@ void game_damage_enemy_ex(int idx, float dmg, vec3 knockDir, float knock, u32 fl
 	bool procs = !(flags & DMG_NO_PROC);
 	if (procs) dmg = items_modify_damage(idx, dmg);
 	dmg *= passive_damage_mult(idx);
-	bool crit = !(flags & DMG_NO_CRIT) && randf() < g.stats.critChance;
+	bool crit = !(flags & DMG_NO_CRIT) && randf() < g.stats.critChance + g.wCrit;
 	if (crit) {
-		dmg *= g.stats.critMult;
-		if (items_count(ITEM_GIANTFORK) && randf() < 0.10f * items_count(ITEM_GIANTFORK)) dmg *= 2; // megacrit
+		dmg *= g.stats.critMult + g.wCritDmg;
+		if (items_count(ITEM_GIANTFORK) && randf() < 0.10f * items_count(ITEM_GIANTFORK))   // megacrit
+			dmg *= items_megacrit_mult() / 2.0f;
 	}
 	e->hp -= dmg;
 	e->hitFlash = 0.12f;
 	float kres = (d->flags & (ENEMY_BOSS | ENEMY_MINIBOSS)) ? 0.1f : 1.0f;
-	e->vel = v3_add(e->vel, v3_scale(knockDir, knock * g.stats.knockback * kres * 40.0f / (d->mass + 20.0f)));
+	e->vel = v3_add(e->vel, v3_scale(knockDir, knock * g.stats.knockback * g.wKnock * kres * 40.0f / (d->mass + 20.0f)));
 	spawn_damage_number(v3_add(e->pos, v3(0, 3.0f * e->scale, 0)), dmg, crit);
 	if (e->hp <= 0) enemy_kill(idx);
 	else audio_play_sfx(SFX_HIT);
 	passive_on_damage_dealt(idx, dmg);
-	if (procs) items_on_hit(idx, dmg, crit);  // procs never re-proc (they pass DMG_NO_PROC)
+	if (procs) items_on_hit(idx, dmg, crit);
+	if (procs && g.stats.lifesteal > 0 && randf() < g.stats.lifesteal) game_heal(1);  // procs never re-proc (they pass DMG_NO_PROC)
 }
 
 void game_damage_enemy(int idx, float dmg, vec3 knockDir, float knock)
@@ -628,6 +652,7 @@ void game_damage_player(float dmg)
 	if (randf() < fminf(g.stats.evasion, 0.6f)) {
 		spawn_damage_number(v3_add(g.pos, v3(0, 4.5f, 0)), 0, false);
 		passive_on_evade();
+		items_on_evade();
 		return;
 	}
 	if (weapons_try_block()) return;   // Aegis
@@ -635,6 +660,13 @@ void game_damage_player(float dmg)
 	dmg *= 1.0f / (1.0f + g.stats.armor);
 	dmg = items_on_player_damaged(dmg);
 	if (dmg <= 0) return;
+	g.shieldDelay = 4.0f;
+	if (g.shield > 0) {
+		float absorbed = fminf(g.shield, dmg);
+		g.shield -= absorbed;
+		dmg -= absorbed;
+		if (dmg <= 0) { g.iframes = 0.5f; audio_play_sfx(SFX_HIT); return; }
+	}
 	g.hp -= dmg;
 	g.iframes = 0.5f;
 	g.hurtFlash = 0.3f;
@@ -693,10 +725,10 @@ void game_roll_choices(void)
 			} else if (r < 0.62f) {
 				ch.kind = CHOICE_UPGRADE_WEAPON;
 				ch.index = rand() % g.numWeapons;
+				if (g.weapons[ch.index].level >= items_weapon_level_cap()) continue;
 				const WeaponDef* wd = &g_weaponDefs[g.weapons[ch.index].id];
-				int stats[STAT_COUNT], n = 0;
-				for (int s = 0; s < STAT_COUNT; s++)
-					if (wd->upgradeMask & (1u << s)) stats[n++] = s;
+				int stats[MAX_WEAPON_UPGRADES], n = 0;
+				for (int s = 0; s < wd->nups; s++) stats[n++] = wd->ups[s].stat;
 				if (!n) continue;
 				int want = (ch.rarity >= RARITY_RARE ? 2 : 1) + (items_count(ITEM_ANVIL) ? 1 : 0);
 				if (want > MAX_CHOICE_STATS) want = MAX_CHOICE_STATS;
@@ -706,7 +738,7 @@ void game_roll_choices(void)
 				ch.nstats = want;
 				for (int s = 0; s < want; s++) {
 					ch.stat[s] = stats[s];
-					ch.amount[s] = weapon_stat_roll(ch.stat[s], ch.rarity);
+					ch.amount[s] = weapon_stat_roll(g.weapons[ch.index].id, ch.stat[s], ch.rarity);
 				}
 			} else {
 				ch.kind = CHOICE_TOME;
@@ -732,6 +764,7 @@ void game_roll_stat_choices(Rarity minRarity)
 			ch.kind = CHOICE_STAT;
 			ch.index = rand() % TOME_COUNT;
 			if (ch.index == TOME_QUANTITY && randf() < 0.7f) continue; // keep +projectiles rare
+			if (ch.index == TOME_CURSED) continue;
 			ch.rarity = roll_rarity(0.1f);
 			if (ch.rarity < minRarity) ch.rarity = minRarity;
 			bool dup = false;
@@ -747,20 +780,29 @@ void game_roll_stat_choices(Rarity minRarity)
 
 bool tome_is_percent(int t)
 {
-	return t != TOME_HEALTH && t != TOME_REGEN && t != TOME_ATTRACTION && t != TOME_QUANTITY;
+	return t != TOME_HEALTH && t != TOME_REGEN && t != TOME_QUANTITY && t != TOME_SHIELD && t != TOME_THORNS;
 }
 
 float tome_amount(int t, Rarity r)
 {
+	// per-level values of the game's tomes (megabonk.org database)
 	static const float base[TOME_COUNT] = {
-		[TOME_DAMAGE] = 0.10f, [TOME_COOLDOWN] = 0.08f, [TOME_AGILITY] = 0.07f, [TOME_HEALTH] = 20,
-		[TOME_REGEN] = 0.35f, [TOME_ARMOR] = 0.12f, [TOME_EVASION] = 0.05f, [TOME_ATTRACTION] = 1.6f,
-		[TOME_SIZE] = 0.08f, [TOME_QUANTITY] = 1, [TOME_PRECISION] = 0.05f, [TOME_XP] = 0.12f,
-		[TOME_LUCK] = 0.08f, [TOME_PROJSPEED] = 0.10f,
+		[TOME_DAMAGE] = 0.08f, [TOME_COOLDOWN] = 0.075f, [TOME_AGILITY] = 0.15f, [TOME_HEALTH] = 25,
+		[TOME_REGEN] = 40, [TOME_ARMOR] = 0.12f, [TOME_EVASION] = 0.10f, [TOME_ATTRACTION] = 0.75f,
+		[TOME_SIZE] = 0.10f, [TOME_QUANTITY] = 1, [TOME_PRECISION] = 0.07f, [TOME_XP] = 0.07f,
+		[TOME_LUCK] = 0.07f, [TOME_PROJSPEED] = 0.15f, [TOME_SHIELD] = 25, [TOME_THORNS] = 15,
+		[TOME_BLOODY] = 0.10f, [TOME_KNOCKBACK] = 0.20f, [TOME_GOLDEN] = 0.12f, [TOME_DURATION] = 0.15f,
+		[TOME_CURSED] = 0.035f, [TOME_CHAOS] = 1.0f,
 	};
 	return t == TOME_QUANTITY ? 1 : base[t] * RARITY_MULT[r];
 }
 
+float tome_display(int t, float a)
+{
+	return tome_is_percent(t) ? a * 100 : a;
+}
+
+static void apply_tome(int t, float a);
 static void apply_tome(int t, float a)
 {
 	PlayerStats* s = &g.stats;
@@ -769,16 +811,30 @@ static void apply_tome(int t, float a)
 	case TOME_COOLDOWN:   s->attackSpeed += a; break;
 	case TOME_AGILITY:    s->moveSpeed += a; break;
 	case TOME_HEALTH:     s->maxHp += a; g.hp += a; break;
-	case TOME_REGEN:      s->regen += a; break;
+	case TOME_REGEN:      s->regen += a / 60.0f; break;   // HP per minute
 	case TOME_ARMOR:      s->armor += a; break;
 	case TOME_EVASION:    s->evasion += a; break;
-	case TOME_ATTRACTION: s->pickupRange += a; break;
+	case TOME_ATTRACTION: s->pickupRange += 9.0f * a; break;   // % of the base range
 	case TOME_SIZE:       s->sizeMult += a; break;
 	case TOME_QUANTITY:   s->extraProjectiles += (int)a; break;
 	case TOME_PRECISION:  s->critChance += a; break;
 	case TOME_XP:         s->xpMult += a; break;
 	case TOME_LUCK:       s->luck += a; break;
 	case TOME_PROJSPEED:  s->projSpeedMult += a; break;
+	case TOME_SHIELD:     s->shieldMax += a; g.shield += a; break;
+	case TOME_THORNS:     s->thorns += a; break;
+	case TOME_BLOODY:     s->lifesteal += a; break;
+	case TOME_KNOCKBACK:  s->knockback += a; break;
+	case TOME_GOLDEN:     s->goldMult += a; break;
+	case TOME_DURATION:   s->durationMult += a; break;
+	case TOME_CURSED:     g.difficulty += a; s->xpMult += a; s->goldMult += a; break;
+	case TOME_CHAOS: {
+		// a random other tome's boost, scaled by this roll
+		int o;
+		do o = rand() % TOME_COUNT; while (o == TOME_CHAOS || o == TOME_CURSED || o == TOME_QUANTITY);
+		apply_tome(o, tome_amount(o, RARITY_COMMON) * a);
+		break;
+	}
 	}
 }
 
@@ -833,7 +889,7 @@ static void player_update(float dt)
 
 	vec3 fwd = dir_of_yaw(g.camYaw), right = v3(cosf(g.camYaw), 0, -sinf(g.camYaw));
 	vec3 wish = v3_add(v3_scale(fwd, iz), v3_scale(right, ix));
-	float speed = 8.5f * g.stats.moveSpeed;
+	float speed = 8.5f * g.stats.moveSpeed * items_speed_mult();
 	if (passive_current() == PASSIVE_SPEEDDEMON) speed *= 1.0f + 0.5f * g.speedDemon;
 	float accel = g.grounded ? 14.0f : 5.0f;
 	float t = clampf(accel * dt, 0, 1);
@@ -854,7 +910,7 @@ static void player_update(float dt)
 	g.jumpTime += dt;
 
 	if ((down & (KEY_A | KEY_B)) && g.jumpsLeft > 0) {
-		g.vel.y = JUMP_VEL * items_jump_mult();
+		g.vel.y = JUMP_VEL * items_jump_mult() * passive_jump_mult();
 		g.grounded = false;
 		g.jumpsLeft--;
 		g.jumpTime = 0;
@@ -891,6 +947,21 @@ static void pickups_update(float dt)
 		if (!p->attracted) continue;
 		vec3 to = v3_sub(target, p->pos);
 		float d = v3_len(to);
+		if (p->kind == PICKUP_XP && items_count(ITEM_SHATTEREDKNOWLEDGE)) {
+			// Shattered Knowledge: flying shards slice through enemies
+			p->hitCd -= dt;
+			if (p->hitCd <= 0) {
+				p->hitCd = 0.25f;
+				for (int j = 0; j < MAX_ENEMIES; j++) {
+					Enemy* e = &g.enemies[j];
+					if (!e->active) continue;
+					float rr = g_enemyDefs[e->def].radius * e->scale + 0.8f;
+					if (dist2_xz(e->pos, p->pos) < rr * rr)
+						game_damage_enemy_ex(j, 6 * g.stats.damageMult * items_count(ITEM_SHATTEREDKNOWLEDGE),
+						                     v3(0, 0, 0), 0, DMG_NO_PROC);
+				}
+			}
+		}
 		if (d < 1.2f) {
 			p->active = false;
 			switch (p->kind) {
@@ -936,9 +1007,10 @@ void game_update(float dt)
 
 	g.time += dt;
 	player_update(dt);
+	shield_update(dt);
 	interact_update(dt);
 	director_update(dt);
-	enemies_update(dt);
+	enemies_update(dt * items_enemy_time_scale());
 	weapons_update(dt);
 	projectiles_update(dt);
 	zones_update(dt);

@@ -2,10 +2,7 @@
 #include "mathutil.h"
 #include "audio.h"
 #include <string.h>
-
-#define U(s) (1u << (s))
-#define UP_BASIC (U(STAT_DAMAGE) | U(STAT_COOLDOWN))
-#define UP_PROJ  (UP_BASIC | U(STAT_PROJECTILES) | U(STAT_SPEED))
+#include <stdio.h>
 
 const char* const g_weaponIcons[WEAPON_COUNT] = {
 	[WEAPON_FIRESTAFF] = "icon_firestaff", [WEAPON_AURA] = "icon_aura", [WEAPON_BONE] = "icon_bone",
@@ -16,79 +13,148 @@ const char* const g_weaponIcons[WEAPON_COUNT] = {
 	[WEAPON_BANANARANG] = "icon_bananarang", [WEAPON_KATANA] = "icon_katana", [WEAPON_FROSTWALKER] = "icon_frostwalker",
 	[WEAPON_SCYTHE] = "icon_scythe", [WEAPON_BOW] = "icon_bow", [WEAPON_BLACKHOLE] = "icon_blackhole",
 	[WEAPON_WIRELESSDAGGER] = "icon_bluetooth_knife", [WEAPON_BLOODMAGIC] = "icon_bloodmagic",
+	[WEAPON_SHOTGUN] = "icon_shotgun", [WEAPON_MINES] = "icon_mine", [WEAPON_SLUTTYROCKET] = "icon_sluttyrocket",
+	[WEAPON_SPACENOODLE] = "icon_space_noodle", [WEAPON_HEROSWORD] = "icon_herosword", [WEAPON_CHUNKERS] = "icon_chunkers",
+	[WEAPON_FLAMEWALKER] = "icon_firewalker", [WEAPON_DRAGONBREATH] = "icon_dragonsbreath",
 };
 
-// Names/descriptions are the game's; numbers are hand-tuned (IL2CPP WeaponData
-// doesn't decode reliably).
-//   name, desc, damage, cooldown, projectiles, size, speed, duration, bounces, upgrade mask
+// Names and descriptions are the game's. Damage, knockback, crit, projectile count, bounces,
+// cooldown (burstTime + endCooldown) and the level-up stat lines come from the game's
+// WeaponData / UpgradeData assets. Speed and duration are in this port's own units.
+//   name, desc, damage, knockback, crit, projectiles, bounces, cooldown, nups, ups, speed, duration
 const WeaponDef g_weaponDefs[WEAPON_COUNT] = {
-	[WEAPON_FIRESTAFF] = { "Firestaff", "Shoots exploding fireballs", 14, 1.3f, 1, 1, 26, 2.0f, 0, UP_PROJ | U(STAT_SIZE) },
-	[WEAPON_AURA] = { "Aura", "Damages nearby enemies", 6, 0.6f, 0, 1, 0, 0, 0, UP_BASIC | U(STAT_SIZE) },
-	[WEAPON_BONE] = { "Bone", "Bouncing bone", 12, 1.1f, 1, 1, 24, 3.0f, 2, UP_PROJ | U(STAT_BOUNCES) | U(STAT_SIZE) },
-	[WEAPON_SWORD] = { "Sword", "Slashes in front of you", 18, 1.2f, 1, 1, 0, 0, 0, UP_BASIC | U(STAT_PROJECTILES) | U(STAT_SIZE) },
-	[WEAPON_REVOLVER] = { "Revolver", "Fires a quick burst", 9, 1.0f, 2, 1, 55, 1.2f, 0, UP_PROJ },
-	[WEAPON_LIGHTNING] = { "Lightning Staff", "Strikes random enemies", 22, 1.8f, 1, 1, 0, 0, 0, UP_BASIC | U(STAT_PROJECTILES) | U(STAT_SIZE) },
-	[WEAPON_AXE] = { "Axe", "Returns like a boomerang", 16, 1.8f, 1, 1, 22, 1.6f, 0, UP_PROJ | U(STAT_SIZE) | U(STAT_DURATION) },
-	[WEAPON_DICE] = { "Dice", "Random damage, bounces", 7, 1.4f, 1, 1, 26, 3.0f, 3, UP_BASIC | U(STAT_PROJECTILES) | U(STAT_BOUNCES) },
+	[WEAPON_FIRESTAFF] = { "Firestaff", "Shoots fireballs that explode on impact",
+		10, 1.0f, 0.0f, 1, 0, 1.5f, 4,
+		{ { STAT_SPEED, 0.2f }, { STAT_DAMAGE, 2.5f }, { STAT_PROJECTILES, 1.0f }, { STAT_SIZE, 0.16f } }, 26, 2.0f },
+	[WEAPON_AURA] = { "Aura", "Damage enemies in an area around you",
+		6, 0.5f, 0.0f, 0, 0, 0.3f, 2,
+		{ { STAT_SIZE, 0.14f }, { STAT_DAMAGE, 1.4f } }, 0, 0.0f },
+	[WEAPON_BONE] = { "Bone", "Throws bones that bounce off enemies",
+		11, 1.5f, 0.1f, 1, 1, 1.4f, 6,
+		{ { STAT_DAMAGE, 2.5f }, { STAT_PROJECTILES, 1.0f }, { STAT_SPEED, 0.25f }, { STAT_BOUNCES, 1.0f }, { STAT_CRIT, 0.12f }, { STAT_CRITDMG, 0.25f } }, 24, 3.0f },
+	[WEAPON_SWORD] = { "Sword", "Slashes through multiple enemies",
+		11, 2.0f, 0.0f, 1, 0, 1.25f, 4,
+		{ { STAT_SIZE, 0.2f }, { STAT_DAMAGE, 2.0f }, { STAT_PROJECTILES, 1.0f }, { STAT_KNOCKBACK, 0.25f } }, 0, 0.0f },
+	[WEAPON_REVOLVER] = { "Revolver", "Fires multiple bullets at enemies",
+		5, 0.4f, 0.05f, 6, 0, 2.5f, 6,
+		{ { STAT_DAMAGE, 2.5f }, { STAT_PROJECTILES, 1.0f }, { STAT_CRIT, 0.1f }, { STAT_CRITDMG, 0.2f }, { STAT_BOUNCES, 1.0f }, { STAT_SPEED, 0.2f } }, 55, 1.2f },
+	[WEAPON_LIGHTNING] = { "Lightning Staff", "Summons lightning to smite nearby enemies",
+		7, 1.0f, 0.0f, 1, 0, 1.4f, 4,
+		{ { STAT_SIZE, 0.2f }, { STAT_DAMAGE, 2.0f }, { STAT_PROJECTILES, 1.0f }, { STAT_BOUNCES, 1.0f } }, 0, 0.0f },
+	[WEAPON_AXE] = { "Axe", "Throws spinning axes that deal area-damage",
+		6, 1.0f, 0.0f, 2, 0, 1.4f, 4,
+		{ { STAT_SIZE, 0.1f }, { STAT_DAMAGE, 1.5f }, { STAT_PROJECTILES, 1.0f }, { STAT_DURATION, 0.1f } }, 22, 1.6f },
+	[WEAPON_DICE] = { "Dice", "Throw dice that deal 1-6 damage. Rolling a 6 increases the weapon's Crit Chance permanently.",
+		0, 2.5f, 0.1f, 1, 0, 1.5f, 6,
+		{ { STAT_SPEED, 0.25f }, { STAT_DAMAGE, 2.0f }, { STAT_PROJECTILES, 1.0f }, { STAT_SIZE, 0.15f }, { STAT_CRIT, 0.1f }, { STAT_CRITDMG, 0.2f } }, 26, 3.0f },
 	[WEAPON_POISONFLASK] = { "Poison Flask", "Throws toxic flasks at enemies, dealing area-damage and poisoning them.",
-		8, 1.5f, 1, 1, 16, 3.0f, 0, UP_BASIC | U(STAT_PROJECTILES) | U(STAT_SIZE) | U(STAT_DURATION) },
-	[WEAPON_AEGIS] = { "Aegis", "Blocks incoming attacks and sends out shockwaves", 25, 4.0f, 1, 1, 0, 0, 0,
-		UP_BASIC | U(STAT_PROJECTILES) | U(STAT_SIZE) },
+		1, 1.0f, 0.0f, 1, 0, 1.8f, 5,
+		{ { STAT_DAMAGE, 0.5f }, { STAT_PROJECTILES, 1.0f }, { STAT_SIZE, 0.15f }, { STAT_DURATION, 0.2f }, { STAT_SPEED, 0.125f } }, 16, 3.0f },
+	[WEAPON_AEGIS] = { "Aegis", "Blocks incoming attacks and sends out shockwaves",
+		10, 3.0f, 0.0f, 2, 1, 1.5f, 4,
+		{ { STAT_SIZE, 0.15f }, { STAT_DAMAGE, 2.0f }, { STAT_KNOCKBACK, 0.25f }, { STAT_PROJECTILES, 1.0f } }, 0, 0.0f },
 	[WEAPON_DEXECUTIONER] = { "Dexecutioner", "A piercing blade. Small chance to instantly execute an enemy.",
-		20, 1.5f, 1, 1, 30, 1.2f, 0, UP_PROJ | U(STAT_SIZE) },
-	[WEAPON_TORNADO] = { "Tornado", "Sends out tornadoes, knocking enemies back", 6, 2.6f, 1, 1, 9, 3.0f, 0,
-		UP_BASIC | U(STAT_PROJECTILES) | U(STAT_SIZE) | U(STAT_DURATION) },
-	[WEAPON_SNIPER] = { "Sniper Rifle", "Fires piercing bullets at the toughest enemy", 45, 2.0f, 1, 1, 110, 1.0f, 0, UP_PROJ },
+		9, 1.0f, 0.0f, 1, 0, 1.6f, 4,
+		{ { STAT_SIZE, 0.2f }, { STAT_DAMAGE, 2.0f }, { STAT_PROJECTILES, 1.0f }, { STAT_CRIT, 0.05f } }, 30, 1.2f },
+	[WEAPON_TORNADO] = { "Tornado", "Sends out tornadoes, knocking enemies back",
+		8, 3.0f, 0.0f, 1, 99, 1.8f, 5,
+		{ { STAT_SPEED, 0.2f }, { STAT_DAMAGE, 2.0f }, { STAT_PROJECTILES, 1.0f }, { STAT_KNOCKBACK, 0.2f }, { STAT_SIZE, 0.14f } }, 9, 3.0f },
+	[WEAPON_SNIPER] = { "Sniper Rifle", "Fires piercing bullets at the toughest enemy",
+		22, 4.0f, 0.05f, 1, 0, 2.0f, 3,
+		{ { STAT_DAMAGE, 4.0f }, { STAT_PROJECTILES, 1.0f }, { STAT_SIZE, 0.13f } }, 110, 1.0f },
 	[WEAPON_CORRUPTEDSWORD] = { "Corrupted Sword", "Slashes in both directions. Deals increased damage at low HP.",
-		16, 1.2f, 1, 1, 0, 0, 0, UP_BASIC | U(STAT_PROJECTILES) | U(STAT_SIZE) },
-	[WEAPON_BANANARANG] = { "Bananarang", "Throws bananas that return to the owner", 12, 1.4f, 1, 1, 22, 1.4f, 0,
-		UP_PROJ | U(STAT_SIZE) | U(STAT_DURATION) },
-	[WEAPON_KATANA] = { "Katana", "A sharp blade that targets the closest enemy.", 13, 0.7f, 1, 1, 0, 0, 0,
-		UP_BASIC | U(STAT_PROJECTILES) | U(STAT_SIZE) },
-	[WEAPON_FROSTWALKER] = { "Frostwalker", "Freezes and damages enemies in an area around you", 8, 1.6f, 0, 1, 0, 1.0f, 0,
-		UP_BASIC | U(STAT_SIZE) | U(STAT_DURATION) },
-	[WEAPON_SCYTHE] = { "Scythe", "Slash in a circle around you.", 18, 1.6f, 1, 1, 0, 0, 0, UP_BASIC | U(STAT_SIZE) },
-	[WEAPON_BOW] = { "Bow", "Shoots arrows that pierce enemies", 11, 0.9f, 1, 1, 45, 1.2f, 2, UP_PROJ | U(STAT_BOUNCES) },
-	[WEAPON_BLACKHOLE] = { "Black Hole", "Shoots a black hole that pulls enemies in.", 5, 4.0f, 1, 1, 10, 3.0f, 0,
-		UP_BASIC | U(STAT_SIZE) | U(STAT_DURATION) },
+		12, 2.0f, 0.0f, 1, 0, 1.6f, 4,
+		{ { STAT_SIZE, 0.15f }, { STAT_DAMAGE, 2.0f }, { STAT_PROJECTILES, 1.0f }, { STAT_SPEED, 0.133f } }, 0, 0.0f },
+	[WEAPON_BANANARANG] = { "Bananarang", "Throws bananas that return to the owner",
+		9, 1.0f, 0.0f, 1, 99, 1.7f, 4,
+		{ { STAT_SIZE, 0.14f }, { STAT_DAMAGE, 2.0f }, { STAT_PROJECTILES, 1.0f }, { STAT_SPEED, 0.1f } }, 22, 1.4f },
+	[WEAPON_KATANA] = { "Katana", "A sharp blade that targets the closest enemy.",
+		11, 1.0f, 0.0f, 1, 0, 0.9f, 5,
+		{ { STAT_SIZE, 0.2f }, { STAT_DAMAGE, 2.2f }, { STAT_PROJECTILES, 1.0f }, { STAT_CRIT, 0.08f }, { STAT_CRITDMG, 0.2f } }, 0, 0.0f },
+	[WEAPON_FROSTWALKER] = { "Frostwalker", "Freezes and damages enemies in an area around you",
+		9, 0.5f, 0.0f, 0, 0, 1.25f, 3,
+		{ { STAT_SIZE, 0.1f }, { STAT_DAMAGE, 2.0f }, { STAT_DURATION, 0.075f } }, 0, 1.0f },
+	[WEAPON_SCYTHE] = { "Scythe", "Slash in a circle around you. Killing Elite Enemies charges a stronger attack.",
+		11, 1.0f, 0.0f, 1, 0, 2.35f, 4,
+		{ { STAT_SIZE, 0.12f }, { STAT_DAMAGE, 1.5f }, { STAT_PROJECTILES, 1.0f }, { STAT_KNOCKBACK, 0.15f } }, 0, 0.0f },
+	[WEAPON_BOW] = { "Bow", "Shoots arrows that pierce enemies",
+		9, 0.5f, 0.0f, 1, 99, 0.92f, 6,
+		{ { STAT_SPEED, 0.2f }, { STAT_DAMAGE, 1.75f }, { STAT_PROJECTILES, 1.0f }, { STAT_SIZE, 0.15f }, { STAT_CRIT, 0.08f }, { STAT_CRITDMG, 0.18f } }, 45, 1.2f },
+	[WEAPON_BLACKHOLE] = { "Black Hole", "Shoots a black hole that pulls enemies in.",
+		4.5, 6.0f, 0.0f, 1, 0, 2.5f, 4,
+		{ { STAT_DAMAGE, 1.25f }, { STAT_PROJECTILES, 1.0f }, { STAT_SIZE, 0.13f }, { STAT_DURATION, 0.017f } }, 10, 3.0f },
 	[WEAPON_WIRELESSDAGGER] = { "Wireless Dagger", "Throw smart daggers at your enemies. Wireless tech goes crazy these days.",
-		9, 1.0f, 2, 1, 34, 3.0f, 4, UP_PROJ | U(STAT_BOUNCES) },
+		9, 0.4f, 0.0f, 1, 1, 1.6f, 4,
+		{ { STAT_DAMAGE, 2.0f }, { STAT_PROJECTILES, 1.0f }, { STAT_BOUNCES, 1.0f }, { STAT_SPEED, 0.15f } }, 34, 3.0f },
 	[WEAPON_BLOODMAGIC] = { "Blood Magic", "Summons blood magic. 5% chance to increase Max HP upon killing enemies.",
-		14, 1.3f, 3, 1, 0, 0, 0, UP_BASIC | U(STAT_PROJECTILES) | U(STAT_SIZE) },
+		9, 1.0f, 0.0f, 1, 99, 1.52f, 3,
+		{ { STAT_SIZE, 0.15f }, { STAT_DAMAGE, 1.5f }, { STAT_PROJECTILES, 1.0f } }, 0, 0.0f },
+	[WEAPON_SHOTGUN] = { "Shotgun", "Fires a spread shot, stronger at close range.",
+		9, 3.0f, 0.05f, 1, 0, 2.0f, 5,
+		{ { STAT_DAMAGE, 3.0f }, { STAT_PROJECTILES, 1.0f }, { STAT_SIZE, 0.15f }, { STAT_CRIT, 0.1f }, { STAT_CRITDMG, 0.2f } }, 60, 0.3f },
+	[WEAPON_MINES] = { "Mines", "Deploys mines around you that explode when enemies get close.",
+		10, 4.0f, 0.0f, 1, 0, 2.0f, 4,
+		{ { STAT_SIZE, 0.15f }, { STAT_DAMAGE, 3.0f }, { STAT_PROJECTILES, 1.0f }, { STAT_DURATION, 0.1f } }, 0, 12.0f },
+	[WEAPON_SLUTTYROCKET] = { "Slutty Rocket", "Fires homing missiles",
+		11, 2.0f, 0.05f, 1, 0, 1.3f, 4,
+		{ { STAT_SPEED, 0.2f }, { STAT_DAMAGE, 2.0f }, { STAT_PROJECTILES, 1.0f }, { STAT_CRIT, 0.08f } }, 22, 4.0f },
+	[WEAPON_SPACENOODLE] = { "Space Noodle", "Attaches to a nearby enemy. Deals damage to enemies in-between.",
+		10, 0.5f, 0.0f, 0, 0, 1.0f, 3,
+		{ { STAT_SIZE, 0.2f }, { STAT_DAMAGE, 2.0f }, { STAT_DURATION, 0.05f } }, 0, 0.5f },
+	[WEAPON_HEROSWORD] = { "Hero Sword", "Slashes through multiple enemies and fires a slashing projectile.",
+		11, 2.0f, 0.0f, 1, 0, 1.5f, 4,
+		{ { STAT_SIZE, 0.15f }, { STAT_DAMAGE, 2.0f }, { STAT_PROJECTILES, 1.0f }, { STAT_SPEED, 0.133f } }, 30, 0.8f },
+	[WEAPON_CHUNKERS] = { "Chunkers", "Summons chunky rocks that orbit around you.",
+		12, 2.5f, 0.0f, 3, 0, 1.5f, 5,
+		{ { STAT_SIZE, 0.2f }, { STAT_DAMAGE, 3.0f }, { STAT_KNOCKBACK, 0.25f }, { STAT_PROJECTILES, 1.0f }, { STAT_SPEED, 0.233f } }, 3, 0.0f },
+	[WEAPON_FLAMEWALKER] = { "Flamewalker", "Leaves a trail of fire behind you",
+		5, 0.0f, 0.0f, 1, 0, 1.0f, 4,
+		{ { STAT_SIZE, 0.15f }, { STAT_DAMAGE, 2.0f }, { STAT_PROJECTILES, 1.0f }, { STAT_DURATION, 0.12f } }, 0, 3.0f },
+	[WEAPON_DRAGONBREATH] = { "Dragon's Breath", "Fires a fierce dragon's breath in a cone towards nearby enemies.",
+		16, 0.5f, 0.0f, 0, 0, 2.0f, 3,
+		{ { STAT_SIZE, 0.15f }, { STAT_DAMAGE, 4.0f }, { STAT_DURATION, 0.133f } }, 0, 1.5f },
 };
 
 static const char* const s_statNames[STAT_COUNT] = {
-	"Damage", "Cooldown", "Projectiles", "Size", "Proj. Speed", "Duration", "Bounces",
+	"Damage", "Size", "Duration", "Proj. Speed", "Projectiles", "Bounces", "Crit", "Crit Dmg", "Knockback",
 };
 
 const char* weapon_stat_name(WeaponStat s) { return s_statNames[s]; }
 
-float weapon_stat_roll(WeaponStat s, Rarity r)
+// The upgrade's base amount from UpgradeData, scaled by rarity.
+float weapon_stat_roll(WeaponId id, WeaponStat s, Rarity r)
 {
-	static const float mult[RARITY_COUNT] = { 1.0f, 1.25f, 1.5f, 1.85f, 2.3f };
-	float m = mult[r];
-	switch (s) {
-	case STAT_DAMAGE:      return 0.20f * m;   // +x% damage
-	case STAT_COOLDOWN:    return 0.08f * m;   // -x% cooldown
-	case STAT_PROJECTILES: return r >= RARITY_EPIC ? 2 : 1;
-	case STAT_SIZE:        return 0.12f * m;
-	case STAT_SPEED:       return 0.12f * m;
-	case STAT_DURATION:    return 0.12f * m;
-	case STAT_BOUNCES:     return r >= RARITY_RARE ? 2 : 1;
-	default:               return 0;
-	}
+	static const float mult[RARITY_COUNT] = { 1.0f, 1.2f, 1.4f, 1.7f, 2.0f };
+	const WeaponDef* d = &g_weaponDefs[id];
+	float base = 0;
+	for (int i = 0; i < d->nups; i++)
+		if (d->ups[i].stat == s) base = d->ups[i].amount;
+	if (s == STAT_PROJECTILES || s == STAT_BOUNCES) return r >= RARITY_EPIC ? 2 : 1;
+	return base * mult[r];
+}
+
+void weapon_format_stat(WeaponStat s, float amount, char* buf, size_t n)
+{
+	if (s == STAT_PROJECTILES || s == STAT_BOUNCES)
+		snprintf(buf, n, "+%d %s", (int)amount, s_statNames[s]);
+	else if (s == STAT_DAMAGE)
+		snprintf(buf, n, "+%.1f %s", amount, s_statNames[s]);
+	else
+		snprintf(buf, n, "+%d%% %s", (int)(amount * 100 + 0.5f), s_statNames[s]);
 }
 
 void weapon_apply_upgrade(Weapon* w, WeaponStat stat, float amount)
 {
 	switch (stat) {
-	case STAT_DAMAGE:      w->damage *= 1.0f + amount; break;
-	case STAT_COOLDOWN:    w->cooldown *= 1.0f - amount; if (w->cooldown < 0.12f) w->cooldown = 0.12f; break;
-	case STAT_PROJECTILES: w->projectiles += (int)amount; break;
+	case STAT_DAMAGE:      w->damage += amount; break;
 	case STAT_SIZE:        w->size *= 1.0f + amount; break;
-	case STAT_SPEED:       w->speed *= 1.0f + amount; break;
 	case STAT_DURATION:    w->duration *= 1.0f + amount; break;
+	case STAT_SPEED:       w->speed *= 1.0f + amount; break;
+	case STAT_PROJECTILES: w->projectiles += (int)amount; break;
 	case STAT_BOUNCES:     w->bounces += (int)amount; break;
+	case STAT_CRIT:        w->crit += amount; break;
+	case STAT_CRITDMG:     w->critDmg += amount; break;
+	case STAT_KNOCKBACK:   w->knockback *= 1.0f + amount; break;
 	default: break;
 	}
 }
@@ -102,12 +168,29 @@ void weapons_init_slot(Weapon* w, WeaponId id)
 	w->damage = d->damage;
 	w->cooldown = d->cooldown;
 	w->projectiles = d->projectiles;
-	w->size = d->size;
+	w->size = 1;
 	w->speed = d->speed;
 	w->duration = d->duration;
 	w->bounces = d->bounces;
+	w->crit = d->crit;
+	w->knockback = 1;
 	w->timer = 0.3f;
-	if (id == WEAPON_AEGIS) g.aegisCharges = 1;
+	if (id == WEAPON_AEGIS) g.aegisCharges = w->projectiles;
+}
+
+// Damage context: per-weapon crit / knockback for everything a weapon hits.
+static void weapon_ctx(const Weapon* w)
+{
+	g.wCrit = w ? w->crit : 0;
+	g.wCritDmg = w ? w->critDmg : 0;
+	g.wKnock = w ? w->knockback : 1;
+}
+
+static Weapon* weapon_slot(int id)
+{
+	for (int i = 0; i < g.numWeapons; i++)
+		if (g.weapons[i].id == id) return &g.weapons[i];
+	return NULL;
 }
 
 // ---------------------------------------------------------------- helpers
@@ -126,6 +209,8 @@ static Projectile* proj_alloc(void)
 	return NULL;
 }
 
+static u8 s_firing = 0xFF;   // weapon currently firing / whose projectile is being updated
+
 static Zone* zone_spawn(ZoneKind kind, vec3 pos, float radius, float life, float dmg)
 {
 	for (int i = 0; i < MAX_ZONES; i++)
@@ -138,6 +223,7 @@ static Zone* zone_spawn(ZoneKind kind, vec3 pos, float radius, float life, float
 			z->radius = radius;
 			z->life = life;
 			z->damage = dmg;
+			z->weapon = s_firing;
 			return z;
 		}
 	return NULL;
@@ -378,8 +464,148 @@ static bool fire_weapon(Weapon* w)
 		if (any) audio_play_sfx(blood ? SFX_EXPLOSION : SFX_LIGHTNING);
 		return any;
 	}
+	case WEAPON_SHOTGUN: {
+		int t = game_nearest_enemy(g.pos, 22, -1);
+		if (t < 0) return false;
+		vec3 dir = v3_norm(v3_sub(enemy_center(t), origin));
+		int pellets = 3 + 2 * count;
+		for (int i = 0; i < pellets; i++)
+			fire_projectile(w, PROJ_PELLET, origin, rotate_y(dir, (i - (pellets - 1) * 0.5f) * 0.1f + randrange(-0.03f, 0.03f)));
+		audio_play_sfx(SFX_GUN);
+		return true;
+	}
+	case WEAPON_MINES:
+		for (int i = 0; i < count; i++) {
+			float a = randf() * 6.2832f, r = randrange(2.5f, 7.0f);
+			zone_spawn(ZONE_MINE, v3(g.pos.x + sinf(a) * r, 0, g.pos.z + cosf(a) * r), 4.0f * size, dur, dmg);
+		}
+		return true;
+	case WEAPON_SLUTTYROCKET: {
+		int t = game_nearest_enemy(g.pos, 40, -1);
+		if (t < 0) return false;
+		vec3 dir = flat_dir_to(t);
+		for (int i = 0; i < count; i++)
+			fire_projectile(w, PROJ_MISSILE, origin, v3_norm(v3_add(rotate_y(dir, (i - (count - 1) * 0.5f) * 0.7f), v3(0, 0.8f, 0))));
+		audio_play_sfx(SFX_THROW);
+		return true;
+	}
+	case WEAPON_SPACENOODLE: {
+		bool any = false;
+		for (int s = 0; s < 1 + g.stats.extraProjectiles; s++) {
+			int t = s == 0 ? game_nearest_enemy(g.pos, 18, -1) : random_enemy_near(18);
+			if (t < 0) break;
+			// damage everything between the player and the target
+			vec3 a = g.pos, b = g.enemies[t].pos;
+			vec3 ab = v3(b.x - a.x, 0, b.z - a.z);
+			float len = v3_len(ab);
+			if (len < 0.01f) continue;
+			vec3 dir = v3_scale(ab, 1.0f / len);
+			for (int i = 0; i < MAX_ENEMIES; i++) {
+				Enemy* e = &g.enemies[i];
+				if (!e->active) continue;
+				float along = (e->pos.x - a.x) * dir.x + (e->pos.z - a.z) * dir.z;
+				if (along < 0 || along > len + 1) continue;
+				float side = fabsf((e->pos.x - a.x) * dir.z - (e->pos.z - a.z) * dir.x);
+				if (side > 1.0f * size + g_enemyDefs[e->def].radius * e->scale) continue;
+				game_damage_enemy(i, dmg, v3(dir.z, 0, -dir.x), 0.3f);
+			}
+			Fx* f = fx_spawn(FX_BEAM, v3_add(a, v3(0, 1.8f, 0)), len, 0.35f * dur / 0.5f, COLOR(1.0f, 0.4f, 0.8f));
+			if (f) f->yaw = yaw_of(dir);
+			any = true;
+		}
+		return any;
+	}
+	case WEAPON_HEROSWORD: {
+		float range = 7.0f * size;
+		int t = game_nearest_enemy(g.pos, 30, -1);
+		vec3 facing = t >= 0 ? flat_dir_to(t) : dir_of_yaw(g.yaw);
+		float yaw = yaw_of(facing);
+		for (int s = 0; s < count; s++) {
+			float a = yaw + (s - (count - 1) * 0.5f) * 0.35f;
+			slash(a, range, 1.25f, dmg, 1.0f, COLOR(1, 0.95f, 0.6f), false);
+			Projectile* p = fire_projectile(w, PROJ_WAVE, origin, dir_of_yaw(a));
+			if (p) p->bounces = 99;
+		}
+		audio_play_sfx(SFX_SWORD);
+		return true;
+	}
+	case WEAPON_CHUNKERS:
+		return true;   // the rocks orbit continuously (weapons_update)
+	case WEAPON_FLAMEWALKER:
+		if (sqrtf(g.vel.x * g.vel.x + g.vel.z * g.vel.z) < 1.0f) return false;   // a trail, not a puddle
+		for (int i = 0; i < count; i++) {
+			vec3 at = v3(g.pos.x + randrange(-1.5f, 1.5f) * i, 0, g.pos.z + randrange(-1.5f, 1.5f) * i);
+			zone_spawn(ZONE_FIRE, at, 2.5f * size, dur, dmg);
+		}
+		return true;
+	case WEAPON_DRAGONBREATH: {
+		int t = game_nearest_enemy(g.pos, 12.0f * size, -1);
+		if (t < 0) return false;
+		w->orbit = yaw_of(flat_dir_to(t));
+		w->burstLeft = (int)(5 * dur / 1.5f + 0.5f);   // breathe over the attack duration
+		w->burstTimer = 0;
+		return true;
+	}
 	default:
 		return false;
+	}
+}
+
+static void dragon_breath_tick(Weapon* w)
+{
+	int t = game_nearest_enemy(g.pos, 12.0f * w->size * g.stats.sizeMult, -1);
+	if (t >= 0) w->orbit = yaw_of(flat_dir_to(t));
+	float range = 10.0f * w->size * g.stats.sizeMult;
+	float dmg = w->damage * g.stats.damageMult * 0.4f;
+	for (int i = 0; i < MAX_ENEMIES; i++) {
+		Enemy* e = &g.enemies[i];
+		if (!e->active) continue;
+		vec3 to = v3(e->pos.x - g.pos.x, 0, e->pos.z - g.pos.z);
+		float d = v3_len(to);
+		if (d > range + g_enemyDefs[e->def].radius * e->scale) continue;
+		if (d > 1.5f && fabsf(angle_diff(w->orbit, yaw_of(to))) > 0.45f) continue;
+		game_damage_enemy(i, dmg, v3_norm(to), 0.2f);
+	}
+	vec3 dir = dir_of_yaw(w->orbit);
+	for (int k = 1; k <= 3; k++)
+		fx_spawn(FX_EXPLOSION, v3_add(g.pos, v3(dir.x * range * k / 3.5f, 1.6f, dir.z * range * k / 3.5f)),
+		         0.6f + 0.5f * k * w->size, 0.3f, COLOR(1, 0.45f + 0.1f * k, 0.1f));
+}
+
+static float s_orbitTick;
+
+int weapons_orbiters(vec3* out, int max)
+{
+	Weapon* w = weapon_slot(WEAPON_CHUNKERS);
+	if (!w) return 0;
+	int n = w->projectiles + g.stats.extraProjectiles;
+	if (n > max) n = max;
+	float r = 4.5f * w->size * g.stats.sizeMult;
+	for (int k = 0; k < n; k++) {
+		float a = w->orbit + k * 6.2832f / n;
+		out[k] = v3(g.pos.x + sinf(a) * r, g.pos.y + 1.5f, g.pos.z + cosf(a) * r);
+	}
+	return n;
+}
+
+static void chunkers_update(Weapon* w, float dt)
+{
+	w->orbit += dt * w->speed * g.stats.projSpeedMult;
+	s_orbitTick -= dt;
+	if (s_orbitTick > 0) return;
+	s_orbitTick = 0.2f;
+	vec3 rocks[12];
+	int n = weapons_orbiters(rocks, 12);
+	float rr = 1.3f * w->size * g.stats.sizeMult;
+	for (int i = 0; i < MAX_ENEMIES; i++) {
+		Enemy* e = &g.enemies[i];
+		if (!e->active || e->hitFlash > 0) continue;   // hitFlash doubles as a short per-enemy hit cooldown
+		float er = g_enemyDefs[e->def].radius * e->scale + rr;
+		for (int k = 0; k < n; k++)
+			if (dist2_xz(e->pos, rocks[k]) < er * er) {
+				game_damage_enemy(i, w->damage * g.stats.damageMult, v3_norm(v3(e->pos.x - g.pos.x, 0, e->pos.z - g.pos.z)), 1.2f);
+				break;
+			}
 	}
 }
 
@@ -391,7 +617,9 @@ bool weapons_try_block(void)
 		if (w->id != WEAPON_AEGIS) continue;
 		g.aegisCharges--;
 		float r = 6.0f * w->size * g.stats.sizeMult;
+		weapon_ctx(w);
 		game_area_damage(g.pos, r, w->damage * g.stats.damageMult, 2.5f, 0);
+		weapon_ctx(NULL);
 		fx_spawn(FX_RING, g.pos, r, 0.4f, COLOR(1.0f, 0.9f, 0.5f));
 		g.iframes = 0.5f;
 		audio_play_sfx(SFX_EXPLOSION);
@@ -404,11 +632,23 @@ void weapons_update(float dt)
 {
 	for (int i = 0; i < g.numWeapons; i++) {
 		Weapon* w = &g.weapons[i];
-		// revolver burst
-		if (w->burstLeft > 0) {
+		weapon_ctx(w);
+		s_firing = w->id;
+		if (w->id == WEAPON_CHUNKERS) chunkers_update(w, dt);
+		if (w->id == WEAPON_DRAGONBREATH && w->burstLeft > 0) {
 			w->burstTimer -= dt;
 			if (w->burstTimer <= 0) {
-				w->burstTimer = 0.09f;
+				w->burstTimer = 0.3f;
+				w->burstLeft--;
+				dragon_breath_tick(w);
+				if (w->burstLeft == 4) audio_play_sfx(SFX_FIREBALL);
+			}
+		}
+		// revolver burst
+		if (w->id == WEAPON_REVOLVER && w->burstLeft > 0) {
+			w->burstTimer -= dt;
+			if (w->burstTimer <= 0) {
+				w->burstTimer = 0.12f;
 				w->burstLeft--;
 				int t = game_nearest_enemy(g.pos, 45, -1);
 				if (t >= 0) {
@@ -419,12 +659,14 @@ void weapons_update(float dt)
 				}
 			}
 		}
-		w->timer -= dt * g.stats.attackSpeed;
+		w->timer -= dt * g.stats.attackSpeed * items_attack_speed_mult();
 		if (w->timer <= 0) {
 			if (fire_weapon(w)) w->timer = w->cooldown;
 			else w->timer = 0.1f;
 		}
 	}
+	weapon_ctx(NULL);
+	s_firing = 0xFF;
 }
 
 // ---------------------------------------------------------------- zones
@@ -436,6 +678,18 @@ void zones_update(float dt)
 		if (!z->active) continue;
 		z->age += dt;
 		if (z->age >= z->life) { z->active = false; continue; }
+		weapon_ctx(weapon_slot(z->weapon));
+		s_firing = z->weapon;
+		if (z->kind == ZONE_MINE) {
+			if (z->age < 0.5f) continue;   // arming
+			int t = game_nearest_enemy(z->pos, 2.0f + z->radius * 0.25f, -1);
+			if (t < 0) continue;
+			game_area_damage(z->pos, z->radius, z->damage, 2.0f, 0);
+			fx_spawn(FX_EXPLOSION, v3_add(z->pos, v3(0, 0.5f, 0)), z->radius, 0.35f, COLOR(1, 0.6f, 0.2f));
+			audio_play_sfx(SFX_EXPLOSION);
+			z->active = false;
+			continue;
+		}
 		z->pos = v3_add(z->pos, v3_scale(z->vel, dt));
 		if (z->kind == ZONE_TORNADO) {
 			// wander a little
@@ -454,7 +708,7 @@ void zones_update(float dt)
 		}
 		z->tick -= dt;
 		if (z->tick > 0) continue;
-		z->tick = z->kind == ZONE_POISON ? 0.5f : 0.3f;
+		z->tick = z->kind == ZONE_POISON || z->kind == ZONE_FIRE ? 0.5f : 0.3f;
 		for (int j = 0; j < MAX_ENEMIES; j++) {
 			Enemy* e = &g.enemies[j];
 			if (!e->active) continue;
@@ -474,9 +728,14 @@ void zones_update(float dt)
 			case ZONE_BLACKHOLE:
 				game_damage_enemy(j, z->damage, v3(0, 0, 0), 0);
 				break;
+			case ZONE_FIRE:
+				game_damage_enemy(j, z->damage, kd, 0.2f);
+				break;
 			}
 		}
 	}
+	weapon_ctx(NULL);
+	s_firing = 0xFF;
 }
 
 // ---------------------------------------------------------------- projectiles
@@ -530,6 +789,8 @@ void projectiles_update(float dt)
 	for (int i = 0; i < MAX_PROJECTILES; i++) {
 		Projectile* p = &g.projectiles[i];
 		if (!p->active) continue;
+		weapon_ctx(p->weapon == 0xFF ? NULL : weapon_slot(p->weapon));
+		s_firing = p->weapon;
 		p->age += dt;
 		p->spin += dt * 14.0f;
 		if (p->age > p->life) {
@@ -558,7 +819,8 @@ void projectiles_update(float dt)
 				p->nhits = 0;   // can hit again on the way back
 			}
 		}
-		if (p->kind == PROJ_SOUL || p->kind == PROJ_ROCKET || p->kind == PROJ_ORB || p->kind == PROJ_DAGGER) {
+		if (p->kind == PROJ_SOUL || p->kind == PROJ_ROCKET || p->kind == PROJ_ORB || p->kind == PROJ_DAGGER ||
+		    p->kind == PROJ_MISSILE) {
 			// homing: steer toward the nearest enemy after a short launch
 			int t = p->age > 0.2f ? game_nearest_enemy(p->pos, 40, p->lastHit) : -1;
 			if (t >= 0) {
@@ -573,8 +835,8 @@ void projectiles_update(float dt)
 		if (p->pos.y < 0.3f) p->pos.y = 0.3f;
 		if (p->kind == PROJ_FLASK || p->kind == PROJ_HOLE) continue;   // only burst on landing / timeout
 
-		float radius = p->kind == PROJ_BULLET || p->kind == PROJ_SPIKE || p->kind == PROJ_SNIPE ? 0.5f
-		             : p->kind == PROJ_AXE || p->kind == PROJ_BANANA || p->kind == PROJ_BLADE ? 1.6f * p->size
+		float radius = p->kind == PROJ_BULLET || p->kind == PROJ_SPIKE || p->kind == PROJ_SNIPE || p->kind == PROJ_PELLET ? 0.5f
+		             : p->kind == PROJ_AXE || p->kind == PROJ_BANANA || p->kind == PROJ_BLADE || p->kind == PROJ_WAVE ? 1.6f * p->size
 		             : 0.8f * p->size;
 		int hit = proj_hit_enemy(p, radius);
 		if (hit < 0) continue;
@@ -602,8 +864,20 @@ void projectiles_update(float dt)
 			game_damage_enemy(hit, p->damage, kd, 0.4f);
 			p->active = false;
 			break;
+		case PROJ_PELLET:
+			// stronger at close range
+			game_damage_enemy(hit, p->damage * (1.5f - p->age / p->life), kd, 1.0f);
+			p->active = false;
+			break;
+		case PROJ_MISSILE:
+			game_area_damage(p->pos, 3.0f * p->size, p->damage, 0.8f, 0);
+			fx_spawn(FX_EXPLOSION, p->pos, 3.0f * p->size, 0.3f, COLOR(1.0f, 0.5f, 0.7f));
+			audio_play_sfx(SFX_EXPLOSION);
+			p->active = false;
+			break;
 		case PROJ_SNIPE:
 		case PROJ_BLADE:
+		case PROJ_WAVE:
 		case PROJ_ARROW: {
 			// piercing: remember who was hit
 			Enemy* e = &g.enemies[hit];
@@ -624,12 +898,19 @@ void projectiles_update(float dt)
 			game_damage_enemy(hit, p->damage, kd, 0.6f);
 			bounce_or_die(p, hit);
 			break;
-		case PROJ_DICE:
-			game_damage_enemy(hit, p->damage * (1 + rand() % 6), kd, 0.6f);
+		case PROJ_DICE: {
+			// 1-6 (+ flat damage upgrades); a six permanently adds 1% crit chance to the dice
+			int roll = 1 + rand() % 6;
+			game_damage_enemy(hit, roll * g.stats.damageMult + p->damage, kd, 0.6f);
+			Weapon* w = weapon_slot(WEAPON_DICE);
+			if (roll == 6 && w) w->crit += 0.01f;
 			bounce_or_die(p, hit);
 			break;
+		}
 		default:
 			break;
 		}
 	}
+	weapon_ctx(NULL);
+	s_firing = 0xFF;
 }
