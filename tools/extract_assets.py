@@ -724,6 +724,24 @@ def export_enemies(ctx, env, stage_objs):
     return enemies
 
 
+# EnemyData.specialAttacks[].attackName -> the port's attack pattern (source/attacks.c)
+ATTACK_KINDS = {
+    "CactusProjectile": "ATK_PROJECTILE",
+    "RootAttackContinous": "ATK_CHASE", "GhostRootAttackContinous": "ATK_CHASE",
+    "RootAttackLines3": "ATK_LINES3",
+    "RootAttackLineSingle": "ATK_LINE", "StoneAttackContinous": "ATK_LINE",
+    "RootAttackSinglePredictive": "ATK_PREDICT", "PigMudSplashPredictive": "ATK_PREDICT",
+    "ScorpionSpikesPreditctive": "ATK_PREDICT",
+    "RootAttackClose": "ATK_SLAM", "StoneAttack": "ATK_SLAM", "StoneAttackClose": "ATK_SLAM",
+    "SphereSlam": "ATK_SLAM",
+    "PigMudSplash": "ATK_SPLASH",
+    "ScorpionSpikesMultiple": "ATK_MULTI", "GhostSpikesMultiple": "ATK_MULTI",
+    "BonePillarsPredictiveMultiple": "ATK_MULTI", "DesertPillarsPredictiveMultiple": "ATK_MULTI",
+    "BonePillarsCircles": "ATK_CIRCLE", "DesertPillarsCircles": "ATK_CIRCLE",
+    "ScorpionSpikesHitscan": "ATK_HITSCAN",
+    "LaserTargetAttack": "ATK_LASER", "LaserDiscoAttack": "ATK_DISCO",
+}
+
 STAGES = [  # (id, StageData asset, EnemyData.maps bit, fallback display name, music, boss music)
     ("forest", "StageForest1", 1, "Forest", "MUSIC_FOREST", "MUSIC_FOREST_BOSS"),
     ("desert", "StageDesert1", 2, "Desert", "MUSIC_DESERT", "MUSIC_DESERT_BOSS"),
@@ -819,6 +837,28 @@ def write_tables(ctx, chars, enemies, stages, props):
                  f'"portrait_{cid}", {passive} }},')
     L.append("};\n")
 
+    # special attacks, referenced from EnemyDef by index range
+    attacks = []
+    for e in enemies:
+        e["atk_first"] = len(attacks)
+        for a in e["d"].get("specialAttacks", []):
+            kind = ATTACK_KINDS.get(a["attackName"])
+            if a["isEnabled"] and kind:
+                attacks.append((kind, a))
+            elif a["isEnabled"]:
+                print("unmapped enemy attack", e["name"], a["attackName"])
+        e["atk_count"] = min(len(attacks) - e["atk_first"], 5)
+    L.append(f"#define ENEMY_ATTACK_COUNT {max(len(attacks), 1)}")
+    L.append("// kind, chargeTime, radius, cooldown, cooldownMax, initialCooldown, duration, triggerDistance, endLag, damageMult")
+    L.append("static const EnemyAttack g_enemyAttacks[ENEMY_ATTACK_COUNT] = {")
+    for kind, a in attacks:
+        L.append(f'\t{{ {kind}, {a["attackChargeTime"]:.3f}f, {a["attackRadius"]:.3f}f, {a["attackCooldown"]:.2f}f, '
+                 f'{a["attackCooldownMax"]:.2f}f, {a["initialCooldown"]:.2f}f, {a["duration"]:.2f}f, '
+                 f'{min(a["triggerDistance"], 9999):.1f}f, {a["endLag"]:.3f}f, {a["damageMultiplier"]:.3f}f }},')
+    if not attacks:
+        L.append("\t{ 0 },")
+    L.append("};\n")
+
     L.append(f"#define ENEMY_COUNT {len(enemies)}")
     L.append("static const EnemyDef g_enemyDefs[ENEMY_COUNT] = {")
     for e in enemies:
@@ -839,7 +879,7 @@ def write_tables(ctx, chars, enemies, stages, props):
             f'\t{{ {c_str(e["name"])}, "romfs:/mesh/enemy_{e["id"]}.mbm", {d["hp"]}, {d["damage"]}, '
             f'{d["speed"]:.3f}f, {d["xp"]}, {d["colliderRadius"] * d["rendererScale"]:.3f}f, {d["mass"]:.2f}f, '
             f'{d["creditCost"]:.3f}f, {d["canSpawnAfterTime"]:.2f}f, {fl}, '
-            f'{{ {t[0]:.3f}f, {t[1]:.3f}f, {t[2]:.3f}f }}, {d["maps"]} }},')
+            f'{{ {t[0]:.3f}f, {t[1]:.3f}f, {t[2]:.3f}f }}, {d["maps"]}, {e["atk_first"]}, {e["atk_count"]} }},')
     L.append("};\n")
 
     L.append(f"#define PROP_COUNT {len(props)}")

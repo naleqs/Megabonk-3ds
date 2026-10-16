@@ -81,7 +81,30 @@ typedef struct {
 	u32 flags;
 	float tint[3];
 	u8 maps;              // EnemyData.maps: which stages spawn it randomly (StageDef.mapBit)
+	u8 attackFirst, attackCount;   // range in g_enemyAttacks
 } EnemyDef;
+
+// Enemy special attack patterns (EnemyData.specialAttacks), see attacks.c
+typedef enum {
+	ATK_PROJECTILE,  // shoots a projectile at the player
+	ATK_SLAM,        // ground slam around itself
+	ATK_SPLASH,      // hits the player's current position
+	ATK_PREDICT,     // hits where the player is heading
+	ATK_MULTI,       // several strikes around the player's predicted position
+	ATK_CIRCLE,      // a ring of pillars around the player, then the middle
+	ATK_LINE,        // a line of strikes travelling toward the player
+	ATK_LINES3,      // three lines in a fan
+	ATK_CHASE,       // strikes that follow the player for a while
+	ATK_HITSCAN,     // a thin line from the enemy to the player
+	ATK_LASER,       // a laser that tracks the player
+	ATK_DISCO,       // spinning lasers around the enemy
+	ATK_KIND_COUNT
+} AttackKind;
+
+typedef struct {
+	u8 kind;
+	float charge, radius, cooldown, cooldownMax, initial, duration, trigger, endLag, damageMult;
+} EnemyAttack;
 
 typedef struct {
 	const char* mesh;

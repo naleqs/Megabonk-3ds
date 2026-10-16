@@ -105,7 +105,34 @@ typedef struct {
 	float bloodTimer;
 	float launched;      // Eagle Claw: knocked into the air (stunned, counts as airborne)
 	u16 cursedTick;      // Cursed Doll: last curse tick that hit this enemy
+	// special attacks (attacks.c)
+	u8 atkState;         // 0 idle, 1 charging, 2 end lag
+	u8 atkCur;
+	float atkTimer, atkGap;
+	float atkCd[5];
 } Enemy;
+
+// Enemy special attacks: telegraphed ground strikes, projectiles and lasers
+#define MAX_HAZARDS    64
+#define MAX_ENEMY_PROJ 32
+#define MAX_LASERS     8
+typedef struct {
+	bool active, slam, line, follow;
+	vec3 pos, end;       // end: far point of a line hazard
+	float radius, delay, charge, age, dmg;
+	int owner;
+} Hazard;
+typedef struct {
+	bool active;
+	vec3 pos, vel;
+	float dmg, life;
+	int owner;
+} EnemyProj;
+typedef struct {
+	bool active, track;
+	int owner;
+	float yaw, spin, age, dur, width, dmg, tick;
+} Laser;
 
 typedef enum {
 	PROJ_FIREBALL, PROJ_BONE, PROJ_BULLET, PROJ_AXE, PROJ_DICE,
@@ -310,6 +337,9 @@ typedef struct {
 	Projectile projectiles[MAX_PROJECTILES];
 	int projIdCounter;
 	Zone zones[MAX_ZONES];
+	Hazard hazards[MAX_HAZARDS];
+	EnemyProj enemyProj[MAX_ENEMY_PROJ];
+	Laser lasers[MAX_LASERS];
 	Pickup pickups[MAX_PICKUPS];
 	Fx fx[MAX_FX];
 	DamageNum dmgNums[MAX_DAMAGE_NUMS];
@@ -384,6 +414,13 @@ vec3 game_random_spawn_point(float minR, float maxR);
 void game_fire_item_projectile(ProjKind kind, vec3 from, vec3 dir, float speed, float dmg, float life);
 void game_roll_stat_choices(Rarity minRarity);
 float game_enemy_hp_mult(void);
+float game_enemy_dmg_mult(void);
+
+// attacks.c
+void attacks_on_spawn(Enemy* e);
+bool attacks_enemy_update(int idx, float dt);   // true while the enemy is busy attacking
+void attacks_update(float dt);
+void attacks_draw(void);
 void game_add_xp(float xp);
 void game_apply_choice(const LevelChoice* c);
 void game_roll_choices(void);

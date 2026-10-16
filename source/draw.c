@@ -421,6 +421,8 @@ static void draw_fx(void)
 		}
 	}
 
+	attacks_draw();
+
 	// Chunkers rocks
 	vec3 rocks[12];
 	int nr = weapons_orbiters(rocks, 12);

@@ -96,7 +96,7 @@ float game_enemy_hp_mult(void)
 	return mult;
 }
 
-static float enemy_dmg_mult(void)
+float game_enemy_dmg_mult(void)
 {
 	float m = 1.0f + g.time / 60.0f * 0.12f;
 	if (g.finalSwarm) m *= 1.0f + (g.time - STAGE->stageTime) / 60.0f;
@@ -275,6 +275,7 @@ int game_spawn_enemy(int def, vec3 pos, bool elite)
 	e->scale = elite ? 1.35f : 1.0f;
 	e->animTime = randf();
 	e->attackCd = 0.5f;
+	attacks_on_spawn(e);
 	g.numEnemies++;
 	fx_spawn(FX_SPAWN, e->pos, 1.5f, 0.4f, COLOR(0.6f, 0.2f, 0.9f));
 	return i;
@@ -434,7 +435,7 @@ static void enemies_update(float dt)
 		s_gridHead[c] = i;
 	}
 
-	float dmgMult = enemy_dmg_mult();
+	float dmgMult = game_enemy_dmg_mult();
 	for (int i = 0; i < MAX_ENEMIES; i++) {
 		Enemy* e = &g.enemies[i];
 		if (!e->active) continue;
@@ -450,6 +451,7 @@ static void enemies_update(float dt)
 		if (e->hitFlash > 0) e->hitFlash -= dt;
 		if (e->attackCd > 0) e->attackCd -= dt;
 		if (e->freezeTime > 0) { e->freezeTime -= dt; continue; }
+		if (attacks_enemy_update(i, dt)) { e->animTime += dt * 0.3f; continue; }
 		if (e->launched > 0) {   // Eagle Claw: tossed up, helpless until it lands
 			e->launched -= dt;
 			if (!(d->flags & ENEMY_FLYING)) e->pos.y = 3.0f * sinf(fmaxf(e->launched, 0) / 0.8f * (float)M_PI);
@@ -1006,6 +1008,18 @@ void game_update(float dt)
 	if (g.state != STATE_PLAYING) return;
 
 	g.time += dt;
+#ifdef MB_DEBUG_SPAWN
+	{
+		static float respawn;
+		int def = game_find_enemy_def(MB_DEBUG_SPAWN);
+		bool alive = false;
+		for (int i = 0; i < MAX_ENEMIES; i++) alive |= g.enemies[i].active && g.enemies[i].def == def;
+		if (!alive && def >= 0 && (respawn -= dt) <= 0) {
+			respawn = 2.0f;
+			game_spawn_enemy(def, v3_add(g.pos, v3(0, 0, 18)), false);
+		}
+	}
+#endif
 	player_update(dt);
 	shield_update(dt);
 	interact_update(dt);
@@ -1014,6 +1028,7 @@ void game_update(float dt)
 	weapons_update(dt);
 	projectiles_update(dt);
 	zones_update(dt);
+	attacks_update(dt);
 	items_update(dt);
 	passive_update(dt);
 	pickups_update(dt);

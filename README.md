@@ -55,12 +55,14 @@ and don't upload or share it.
 - 22 tomes, including Shield, Thorns, Bloody, Knockback, Golden, Duration, Cursed and Chaos
 - Chests, pots, the six shrine types, Shady Guy's shop, the microwave, the boss portal and 82 items
   with the game's own rarities
+- Enemy special attacks: Cactus Shooter projectiles plus every miniboss and boss attack (slams, root and
+  stone lines, predictive spikes, pillar circles, lasers), with timings, ranges and cooldowns from the game data
 - The game's music, sound effects, font, icons and portraits
 
 Item, tome and passive numbers that aren't stored in the game's data files (they live in compiled
 code) follow the [megabonk.org database](https://megabonk.org/database/) where it lists them, and are
 estimated otherwise. Not in the port yet: Wizard's Hat, Beacon and Pumpkin (they need tome level caps
-or later stages), Monke's wall climb, the Scythe's charged attack, enemy special attacks, saves and unlocks.
+or later stages), Monke's wall climb, the Scythe's charged attack, saves and unlocks.
 
 [中文说明](README.zh-CN.md)
 

@@ -4,6 +4,7 @@
     .venv\\Scripts\\python tools\\build.py clean
     .venv\\Scripts\\python tools\\build.py debug=170   # dev build: run clock starts at 170s, huge HP;
                                                        # written to build/debug/, never dist/
+    ... debug=60 calm spawn=Miniboss_Golem               # dev: no spawns, one enemy that keeps coming back
 
 Output: dist/3ds/megabonk3ds/megabonk3ds.3dsx  (romfs is embedded; copy this folder
 to the root of the SD card so it ends up at sdmc:/3ds/megabonk3ds/).
@@ -57,6 +58,9 @@ def main():
         CFLAGS.append(f"-DMB_DEBUG_START_TIME={float(debug)}f")
         if "calm" in sys.argv[1:]:
             CFLAGS.append("-DMB_DEBUG_CALM")   # no enemy spawns
+        spawn = next((a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("spawn=")), None)
+        if spawn:
+            CFLAGS.append(f'-DMB_DEBUG_SPAWN="{spawn}"')   # this enemy keeps respawning next to you
         LDFLAGS[-1] = f"-Wl,-Map,{BUILD / (APP + '.map')}"
     if len(sys.argv) > 1 and sys.argv[1] == "clean":
         shutil.rmtree(BUILD, ignore_errors=True)
