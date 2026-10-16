@@ -1,0 +1,16 @@
+# build output (contains converted game assets -- never commit)
+output/
+
+# anything generated if tools are run in-tree
+romfs/
+source/gen/
+meta/
+build/
+dist/
+toolchain/
+.venv/
+__pycache__/
+*.pyc
+
+# temporary build environment (deleted after each build)
+.build-env/

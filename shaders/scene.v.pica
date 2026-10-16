@@ -1,0 +1,73 @@
+; Main 3D shader: frame interpolation + transform + per-vertex directional light.
+;   v0 position A (s16 x4), v1 normal A (s8 x4), v2 texcoord,
+;   v3 position B, v4 normal B   (B = next animation frame; same as A for static meshes)
+;   pos = mix(A, B, lerp.x) * posScale.x
+;   color = (ambient + lightClr * wrap(N.L)) * tint + emissive
+
+.fvec projection[4], modelView[4]
+.fvec lightVec, lightClr, ambient, tint, emissive
+.fvec posScale, lerp
+
+.constf myconst(0.0, 1.0, -1.0, 0.5)
+.alias zeros myconst.xxxx
+.alias ones  myconst.yyyy
+
+.out outpos position
+.out outtc0 texcoord0
+.out outclr color
+
+.alias inposA v0
+.alias innrmA v1
+.alias intex  v2
+.alias inposB v3
+.alias innrmB v4
+
+.proc main
+	; interpolate position between the two frames, then dequantize
+	; (an instruction may read only one input register)
+	mov r6, inposB
+	add r6, r6, -inposA
+	mul r6, lerp.xxxx, r6
+	add r0, inposA, r6
+	mul r0.xyz, posScale.xxxx, r0
+	mov r0.w, ones
+
+	dp4 r1.x, modelView[0], r0
+	dp4 r1.y, modelView[1], r0
+	dp4 r1.z, modelView[2], r0
+	dp4 r1.w, modelView[3], r0
+
+	dp4 outpos.x, projection[0], r1
+	dp4 outpos.y, projection[1], r1
+	dp4 outpos.z, projection[2], r1
+	dp4 outpos.w, projection[3], r1
+
+	mov outtc0, intex
+
+	; interpolated normal -> view space (model matrices only use uniform scale)
+	mov r7, innrmB
+	add r7, r7, -innrmA
+	mul r7, lerp.xxxx, r7
+	add r2, innrmA, r7
+	dp3 r3.x, modelView[0], r2
+	dp3 r3.y, modelView[1], r2
+	dp3 r3.z, modelView[2], r2
+	mov r3.w, zeros
+	dp3 r4, r3, r3
+	rsq r4, r4
+	mul r3, r4, r3
+
+	; wrapped lambert: softer, closer to the game's toon look
+	dp3 r4, lightVec, r3
+	mul r4, myconst.wwww, r4
+	add r4, myconst.wwww, r4
+	max r4, zeros, r4
+	mul r5, lightClr, r4
+	add r5, ambient, r5
+	mul r5, tint, r5
+	add r5, emissive, r5
+	min r5, ones, r5
+	mov outclr.xyz, r5
+	mov outclr.w, tint.w
+	end
+.end
