@@ -1,8 +1,10 @@
 #include "game.h"
+#include "terrain.h"
 #include "mathutil.h"
 #include "audio.h"
 #include <string.h>
 #include <stdio.h>
+#include "unlocks.h"
 
 const char* const g_weaponIcons[WEAPON_COUNT] = {
 	[WEAPON_FIRESTAFF] = "icon_firestaff", [WEAPON_AURA] = "icon_aura", [WEAPON_BONE] = "icon_bone",
@@ -184,6 +186,7 @@ static void weapon_ctx(const Weapon* w)
 	g.wCrit = w ? w->crit : 0;
 	g.wCritDmg = w ? w->critDmg : 0;
 	g.wKnock = w ? w->knockback : 1;
+	g.dmgSource = w ? w->id : DMG_SRC_NONE;
 }
 
 static Weapon* weapon_slot(int id)
@@ -224,6 +227,7 @@ static Zone* zone_spawn(ZoneKind kind, vec3 pos, float radius, float life, float
 			z->life = life;
 			z->damage = dmg;
 			z->weapon = s_firing;
+			z->pos.y = terrain_height(pos.x, pos.z);
 			return z;
 		}
 	return NULL;
@@ -247,6 +251,7 @@ static Projectile* fire_projectile(Weapon* w, ProjKind kind, vec3 from, vec3 dir
 	p->size = w->size * g.stats.sizeMult;
 	p->life = w->duration * g.stats.durationMult;
 	p->bounces = w->bounces;
+	unlocks_count(CNT_PROJECTILES_FIRED, 1);
 	return p;
 }
 
@@ -374,7 +379,7 @@ static bool fire_weapon(Weapon* w)
 			float flight = 0.7f;
 			Projectile* p = fire_projectile(w, PROJ_FLASK, origin, v3(0, 0, 0));
 			if (!p) break;
-			p->vel = v3(to.x / flight, 0.5f * 30.0f * flight + (0 - 2.0f) / flight, to.z / flight);
+			p->vel = v3(to.x / flight, 0.5f * 30.0f * flight + (g.enemies[t].pos.y - origin.y) / flight, to.z / flight);
 			p->life = flight + 0.5f;
 			any = true;
 		}
@@ -455,7 +460,7 @@ static bool fire_weapon(Weapon* w)
 			area_damage(at, 2.5f * size, dmg, 0.5f);
 			if (blood) {
 				fx_spawn(FX_EXPLOSION, v3_add(at, v3(0, 1, 0)), 2.5f * size, 0.3f, COLOR(0.8f, 0.05f, 0.1f));
-				if (!e->active && randf() < 0.05f) { g.stats.maxHp += 1; g.hp += 1; }
+				if (!e->active && randf() < 0.05f) { g.stats.maxHp += 1; g.hp += 1; unlocks_count(CNT_BLOOD_MAGIC_PROCS, 1); }
 			} else {
 				fx_spawn(FX_LIGHTNING, at, 2.5f * size, 0.25f, COLOR(0.5f, 0.85f, 1.0f));
 			}
@@ -616,6 +621,7 @@ bool weapons_try_block(void)
 		Weapon* w = &g.weapons[i];
 		if (w->id != WEAPON_AEGIS) continue;
 		g.aegisCharges--;
+		unlocks_count(CNT_AEGIS_BLOCKS, 1);
 		float r = 6.0f * w->size * g.stats.sizeMult;
 		weapon_ctx(w);
 		game_area_damage(g.pos, r, w->damage * g.stats.damageMult, 2.5f, 0);
@@ -831,8 +837,9 @@ void projectiles_update(float dt)
 		}
 		if (p->kind == PROJ_FLASK) p->vel.y -= 30.0f * dt;
 		p->pos = v3_add(p->pos, v3_scale(p->vel, dt));
-		if (p->kind == PROJ_FLASK && p->pos.y <= 0.3f) { flask_burst(p); continue; }
-		if (p->pos.y < 0.3f) p->pos.y = 0.3f;
+		float floorY = terrain_height(p->pos.x, p->pos.z) + 0.3f;
+		if (p->kind == PROJ_FLASK && p->pos.y <= floorY) { flask_burst(p); continue; }
+		if (p->pos.y < floorY) p->pos.y = floorY;
 		if (p->kind == PROJ_FLASK || p->kind == PROJ_HOLE) continue;   // only burst on landing / timeout
 
 		float radius = p->kind == PROJ_BULLET || p->kind == PROJ_SPIKE || p->kind == PROJ_SNIPE || p->kind == PROJ_PELLET ? 0.5f

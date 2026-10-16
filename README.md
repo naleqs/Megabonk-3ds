@@ -65,6 +65,10 @@ are kept).
   tomes, items and stats, using the game's stage 2 and 3 timers, events and bosses
 - All 21 characters with their animations, starting weapons and passive abilities
   (Calcium rides his skateboard with momentum, Monke climbs rocks, trees and shrines, Birdo floats)
+- Terrain: Forest and Graveyard are built from 40-unit tiles at different heights (like the game's
+  map parameters) with cliffs and ramps between them, and every plateau can be reached from the spawn;
+  Desert has rolling dunes. The generator is the port's own (the game's is compiled code), so layouts
+  differ from the real game. Cliffs are walls, except for Monke, who climbs them
 - Rocks, trees, houses and shrines are solid: you can jump on top of them
 - All 30 weapons. Base damage, knockback, crit chance, projectile count, bounces, cooldown and the
   level-up stat lines are read from the game's own weapon data
@@ -73,13 +77,18 @@ are kept).
   with the game's own rarities
 - Enemy special attacks: Cactus Shooter projectiles plus every miniboss and boss attack (slams, root and
   stone lines, predictive spikes, pillar circles, lasers), with timings, ranges and cooldowns from the game data
+- Unlocks: characters, weapons, tomes and items unlock through the game's own requirements and target
+  numbers (e.g. "Kill 1000 skeletons", "Get the Damage Tome to level 7"); progress is saved and shown under
+  **Records** (L/R to switch pages). Requirements that need things the port doesn't have use a stand-in
+  marked "(port)" (Challenge Shrines for challenges, Tumblebones for tumbleweeds, clearing stage N for
+  "Complete Tier N"), and the ones with nothing to stand in for (the crypt, hidden objects, Bandit/Bush
+  fights, quests) start unlocked. Holding SELECT for 3 seconds on an unlock page unlocks everything.
 - The game's music, sound effects, font, icons and portraits
 
 Item, tome and passive numbers that aren't stored in the game's data files (they live in compiled
 code) follow the [megabonk.org database](https://megabonk.org/database/) where it lists them, and are
 estimated otherwise. Not in the port yet: Wizard's Hat, Beacon and Pumpkin (they need tome level caps
-or stage-to-stage map changes), the Scythe's charged attack, and unlocks
-(everything is available from the start).
+or stage-to-stage map changes) and the Scythe's charged attack.
 
 [中文说明](README.zh-CN.md)
 

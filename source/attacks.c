@@ -1,4 +1,5 @@
 #include "game.h"
+#include "terrain.h"
 #include "mathutil.h"
 #include "audio.h"
 #include <string.h>
@@ -27,6 +28,7 @@ static Hazard* hazard_add(vec3 pos, float radius, float delay, float charge, flo
 		memset(h, 0, sizeof(*h));
 		h->active = true;
 		h->pos = v3(clampf(pos.x, -MAP_HALF, MAP_HALF), 0, clampf(pos.z, -MAP_HALF, MAP_HALF));
+		h->pos.y = terrain_height(h->pos.x, h->pos.z);
 		h->radius = radius;
 		h->delay = delay;
 		h->charge = charge;
@@ -250,7 +252,7 @@ void attacks_update(float dt)
 		if (!h->active) continue;
 		if (h->delay > 0) {
 			h->delay -= dt;
-			if (h->delay <= 0 && h->follow) h->pos = v3(g.pos.x, 0, g.pos.z);
+			if (h->delay <= 0 && h->follow) h->pos = v3(g.pos.x, g.groundY, g.pos.z);
 			continue;
 		}
 		bool wasCharging = h->age < h->charge;
@@ -274,7 +276,7 @@ void attacks_update(float dt)
 		if (!p->active) continue;
 		p->life -= dt;
 		p->pos = v3_add(p->pos, v3_scale(p->vel, dt));
-		if (p->life <= 0 || p->pos.y < 0) { p->active = false; continue; }
+		if (p->life <= 0 || p->pos.y < terrain_height(p->pos.x, p->pos.z)) { p->active = false; continue; }
 		vec3 c = v3_add(g.pos, v3(0, 1.5f, 0));
 		vec3 to = v3_sub(c, p->pos);
 		if (v3_len(to) < 1.3f) {
@@ -349,7 +351,7 @@ void attacks_draw(void)
 			render_mesh_at(&g_meshRing, 0, v3_add(h->pos, v3(0, 0.12f, 0)), 0, h->radius, warn, glow);
 			C3D_Mtx m;
 			Mtx_Identity(&m);
-			Mtx_Translate(&m, h->pos.x, 0.06f, h->pos.z, true);
+			Mtx_Translate(&m, h->pos.x, h->pos.y + 0.06f, h->pos.z, true);
 			Mtx_Scale(&m, h->radius * t, 0.05f, h->radius * t);
 			render_mesh(&g_meshSphere, 0, &m, (Color){ 1, 0.2f, 0.1f, 0.3f }, glow);
 			continue;
@@ -364,7 +366,7 @@ void attacks_draw(void)
 				vec3 p = v3(h->pos.x + d.x * (k + 0.5f) / 12, 0, h->pos.z + d.z * (k + 0.5f) / 12);
 				C3D_Mtx m;
 				Mtx_Identity(&m);
-				Mtx_Translate(&m, p.x, 0, p.z, true);
+				Mtx_Translate(&m, p.x, terrain_height(p.x, p.z), p.z, true);
 				Mtx_RotateX(&m, -(float)M_PI / 2, true);
 				Mtx_Scale(&m, 0.4f, 0.4f, hgt);
 				render_mesh(&g_meshCone, 0, &m, spike, NO_EMIT);
@@ -377,7 +379,8 @@ void attacks_draw(void)
 			float s = (k == n ? 0.5f : 0.35f) * fmaxf(h->radius * 0.5f, 1.0f);
 			C3D_Mtx m;
 			Mtx_Identity(&m);
-			Mtx_Translate(&m, h->pos.x + sinf(ang) * dd, 0, h->pos.z + cosf(ang) * dd, true);
+			float sx = h->pos.x + sinf(ang) * dd, sz = h->pos.z + cosf(ang) * dd;
+			Mtx_Translate(&m, sx, terrain_height(sx, sz), sz, true);
 			Mtx_RotateX(&m, -(float)M_PI / 2, true);   // cone tip (+Z) -> up
 			Mtx_Scale(&m, s, s, hgt * (k == n ? 1.3f : 1.0f));
 			render_mesh(&g_meshCone, 0, &m, spike, NO_EMIT);
@@ -403,7 +406,7 @@ void attacks_draw(void)
 		float pulse = 0.85f + 0.15f * sinf(g.realTime * 30);
 		C3D_Mtx m;
 		Mtx_Identity(&m);
-		Mtx_Translate(&m, a.x, 1.6f, a.z, true);
+		Mtx_Translate(&m, a.x, a.y + 1.6f, a.z, true);
 		Mtx_RotateY(&m, l->yaw, true);
 		Mtx_RotateX(&m, (float)M_PI / 2, true);
 		Mtx_Scale(&m, l->width * 0.6f * pulse, LASER_LENGTH, l->width * 0.6f * pulse);

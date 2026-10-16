@@ -12,6 +12,11 @@ typedef struct {
 	u16 charRuns[MAX_PROFILE_CHARS], charWins[MAX_PROFILE_CHARS];
 	u8  bestStage[MAX_PROFILE_STAGES];     // furthest stage reached, per starting stage
 	u32 bestWinTime[MAX_PROFILE_STAGES];   // fastest full run, seconds (0 = never won)
+	// unlocks (unlocks.c)
+	u32 counters[48];
+	u32 charKills[32], weaponKills[32];
+	u8  unlockBits[160 / 8];
+	u8  unlockAll;                         // the unlock-everything cheat was used
 } SaveProfile;
 
 typedef struct {

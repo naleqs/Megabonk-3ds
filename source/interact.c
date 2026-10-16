@@ -1,4 +1,6 @@
 #include "game.h"
+#include "terrain.h"
+#include "unlocks.h"
 #include "mathutil.h"
 #include "audio.h"
 #include "gen/strings_gen.h"
@@ -56,7 +58,7 @@ void interact_generate(void)
 			bool ok;
 			do { // keep away from spawn and from each other
 				p = v3(randrange(-MAP_HALF + 10, MAP_HALF - 10), 0, randrange(-MAP_HALF + 10, MAP_HALF - 10));
-				ok = p.x * p.x + p.z * p.z > 18 * 18;
+				ok = p.x * p.x + p.z * p.z > 18 * 18 && terrain_slope(p.x, p.z) < 0.35f;   // flat ground only
 				for (int i = 0; ok && i < g.numInteract; i++)
 					ok = dist2_xz(p, g.interact[i].pos) > 9 * 9;
 			} while (!ok && ++tries < 30);
@@ -71,6 +73,7 @@ void interact_generate(void)
 			memset(it, 0, sizeof(*it));
 			it->active = true;
 			it->kind = k;
+			p.y = terrain_height(p.x, p.z);
 			it->pos = p;
 			it->yaw = randf() * 6.283f;
 			it->golden = k == INT_SHRINE_CHARGE && c == 0;
@@ -117,7 +120,7 @@ static void use_one(int i)
 		bool free = it->kind == INT_CHEST_FREE || randf() < items_key_chance();
 		int price = chest_price();
 		if (!free && g.gold < price) { game_toast("Not enough gold"); return; }
-		if (!free) g.gold -= price;
+		if (!free) { g.gold -= price; unlocks_count(CNT_CHESTS_BOUGHT, 1); }
 		g.chestsOpened++;
 		items_on_chest_open();
 		it->active = false;
@@ -126,6 +129,8 @@ static void use_one(int i)
 	}
 	case INT_POT: {
 		it->active = false;
+		g.potsThisRun++;
+		unlocks_count(CNT_POTS_BROKEN, 1);
 		int coins = 1 + rand() % 4;
 		for (int c = 0; c < coins; c++)
 			game_spawn_pickup(PICKUP_GOLD, v3_add(it->pos, v3(randrange(-1, 1), 0, randrange(-1, 1))), 1);
@@ -145,6 +150,7 @@ static void use_one(int i)
 		break;
 	case INT_SHRINE_CURSED: {
 		it->used = true;
+		g.cursesThisStage++;
 		g.difficulty += 0.1f;
 		if (STAGE->minibossCount) {
 			int d = STAGE->minibosses[rand() % STAGE->minibossCount];
@@ -157,6 +163,7 @@ static void use_one(int i)
 	}
 	case INT_SHRINE_MAGNET:
 		it->used = true;
+		unlocks_count(CNT_MAGNET_SHRINES, 1);
 		attract_xp_fx(it->pos);
 		game_toast("The Shrine of Succ pulls in all XP");
 		audio_play_sfx(SFX_SHRINE);
@@ -216,7 +223,10 @@ void interact_use(void)
 	Interactable* it = &g.interact[g.nearInteract];
 	bool wasActive = it->active, wasUsed = it->used;
 	use_one(g.nearInteract);
-	if ((wasActive && !it->active) || (!wasUsed && it->used)) items_on_interact();   // Ghost
+	if ((wasActive && !it->active) || (!wasUsed && it->used)) {
+		items_on_interact();   // Ghost
+		if (it->kind != INT_POT) g.stageTookItems = true;
+	}
 }
 
 int shop_price(const Interactable* it, int slot)
@@ -255,6 +265,7 @@ void microwave_use(int slot)
 	if (!n) { game_toast("Needs another item of the same tier"); return; }
 	items_take(cand[rand() % n]);
 	items_give(chosen);
+	unlocks_on_microwave(chosen);
 	g.interact[g.activeShop].used = true;
 	g.state = STATE_PLAYING;
 	char buf[64];
@@ -271,7 +282,7 @@ bool interact_solid(int i, float* radius, float* top)
 	if (!it->active || d->collide <= 0) return false;
 	const Mesh* m = g.interactMeshes[it->kind];
 	*radius = d->collide;
-	*top = m ? m->maxy * d->scale : 2.0f;
+	*top = it->pos.y + (m ? m->maxy * d->scale : 2.0f);
 	return true;
 }
 
@@ -295,6 +306,8 @@ void interact_update(float dt)
 			if (it->progress >= 1) {
 				it->used = true;
 				items_on_interact();
+				g.stageTookItems = true;
+				if (game_first_stage(g.stage) == 1) unlocks_count(CNT_DESERT_SHRINE_CHARGES, 1);   // Desert
 				game_roll_stat_choices(it->golden ? RARITY_EPIC : RARITY_UNCOMMON);
 				audio_play_sfx(SFX_LEVELUP);
 			}
@@ -316,6 +329,7 @@ void interact_update(float dt)
 		if (it->timer <= 0) {
 			game_spawn_pickup(PICKUP_CHEST, it->pos, 1);
 			game_toast("Challenge complete! A chest appeared");
+			unlocks_count(CNT_CHALLENGE_SHRINES, 1);
 			g.challengeIndex = -1;
 		}
 	}

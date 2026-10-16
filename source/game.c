@@ -1,9 +1,11 @@
 #include "game.h"
+#include "terrain.h"
 #include "mathutil.h"
 #include "audio.h"
 #include <string.h>
 #include <stdio.h>
 #include "save.h"
+#include "unlocks.h"
 
 Game g;
 
@@ -212,10 +214,13 @@ void game_new_run(int character, int stage)
 	g.swarmEnemy = -1;
 	g.wKnock = 1;
 	g.skateYaw = 0;
+	g.dmgSource = DMG_SRC_NONE;
+	g.microwaveItem = -1;
 
 	weapons_init_slot(&g.weapons[0], g_characters[character].startWeapon);
 	g.numWeapons = 1;
 
+	g.terrainSeed = (u32)osGetTime() * 2654435761u | 1;
 	world_generate();
 	interact_generate();
 	g.pos = v3(0, 0, 0);
@@ -274,6 +279,11 @@ void game_next_stage(void)
 	keep = g;
 	game_new_run(keep.character, next);
 	g.runTime = keep.runTime;
+	g.runDamaged = keep.runDamaged;
+	g.potsThisRun = keep.potsThisRun;
+	g.noHitTime = keep.noHitTime;
+	g.microwaveItem = keep.microwaveItem;
+	g.microwaveStreak = keep.microwaveStreak;
 	g.hp = keep.hp;
 	g.shield = keep.shield;
 	g.level = keep.level;
@@ -321,10 +331,12 @@ vec3 game_random_spawn_point(float minR, float maxR)
 		float a = randf() * 6.2832f;
 		float r = randrange(minR, maxR);
 		vec3 p = v3(g.pos.x + sinf(a) * r, 0, g.pos.z + cosf(a) * r);
-		if (fabsf(p.x) < MAP_HALF - 4 && fabsf(p.z) < MAP_HALF - 4) return p;
+		if (fabsf(p.x) < MAP_HALF - 4 && fabsf(p.z) < MAP_HALF - 4) { p.y = terrain_height(p.x, p.z); return p; }
 	}
-	return v3(clampf(g.pos.x + randrange(-maxR, maxR), -MAP_HALF + 4, MAP_HALF - 4), 0,
-	          clampf(g.pos.z + randrange(-maxR, maxR), -MAP_HALF + 4, MAP_HALF - 4));
+	vec3 p = v3(clampf(g.pos.x + randrange(-maxR, maxR), -MAP_HALF + 4, MAP_HALF - 4), 0,
+	            clampf(g.pos.z + randrange(-maxR, maxR), -MAP_HALF + 4, MAP_HALF - 4));
+	p.y = terrain_height(p.x, p.z);
+	return p;
 }
 
 int game_spawn_enemy(int def, vec3 pos, bool elite)
@@ -346,6 +358,7 @@ int game_spawn_enemy(int def, vec3 pos, bool elite)
 	e->scale = elite ? 1.35f : 1.0f;
 	e->animTime = randf();
 	e->attackCd = 0.5f;
+	e->spawnTime = g.time;
 	attacks_on_spawn(e);
 	g.numEnemies++;
 	fx_spawn(FX_SPAWN, e->pos, 1.5f, 0.4f, COLOR(0.6f, 0.2f, 0.9f));
@@ -530,7 +543,7 @@ static void enemies_update(float dt)
 		if (e->poisonTime > 0) {
 			e->poisonTime -= dt;
 			e->hp -= e->poisonDps * dt;
-			if (e->hp <= 0) { enemy_kill(i); continue; }
+			if (e->hp <= 0) { g.dmgSource = DMG_SRC_POISON; enemy_kill(i); g.dmgSource = DMG_SRC_NONE; continue; }
 			if (e->poisonTime <= 0) e->poisonDps = 0;
 		}
 		if (e->hitFlash > 0) e->hitFlash -= dt;
@@ -584,10 +597,11 @@ static void enemies_update(float dt)
 		e->pos = v3_add(e->pos, v3_scale(v3_add(move, e->vel), dt));
 		float decay = expf(-dt * 8.0f);
 		e->vel = v3_scale(e->vel, decay);
+		float ground = terrain_height(e->pos.x, e->pos.z);
 		if (d->flags & ENEMY_FLYING)
-			e->pos.y = lerpf(e->pos.y, g.pos.y + 1.5f + sinf(e->animTime * 2) * 0.4f, dt * 2);
+			e->pos.y = fmaxf(lerpf(e->pos.y, g.pos.y + 1.5f + sinf(e->animTime * 2) * 0.4f, dt * 2), ground + 1.0f);
 		else
-			e->pos.y = 0;
+			e->pos.y = ground;
 		e->pos.x = clampf(e->pos.x, -MAP_HALF, MAP_HALF);
 		e->pos.z = clampf(e->pos.z, -MAP_HALF, MAP_HALF);
 
@@ -661,6 +675,8 @@ static void enemy_kill(int idx)
 	g.kills++;
 	fx_spawn(FX_DEATH, e->pos, d->radius * e->scale * 1.4f, 0.35f, COLOR(1, 1, 1));
 	audio_play_sfx(SFX_ENEMY_DIE);
+	unlocks_on_kill(idx, g.dmgSource);
+	if (d->flags & (ENEMY_BOSS | ENEMY_MINIBOSS)) unlocks_on_boss_kill(idx, d->flags & ENEMY_BOSS);
 
 	float xp = (float)d->xp;
 	if (e->elite) xp *= 10;
@@ -684,6 +700,7 @@ static void enemy_kill(int idx)
 		g.bossIndex = -1;
 		g.state = STATE_WIN;
 		g.choiceLock = 1.0f;   // don't skip the stage-clear screen with a held button
+		unlocks_on_stage_clear();
 		profile_stage_cleared();
 		if (STAGE->next < 0) profile_run_end(true);   // the last stage: the run is won
 		audio_play_sfx(SFX_LEVELUP);
@@ -700,6 +717,7 @@ void game_damage_enemy_ex(int idx, float dmg, vec3 knockDir, float knock, u32 fl
 	dmg *= passive_damage_mult(idx);
 	bool crit = !(flags & DMG_NO_CRIT) && randf() < g.stats.critChance + g.wCrit;
 	if (crit) {
+		unlocks_count(CNT_CRITS, 1);
 		dmg *= g.stats.critMult + g.wCritDmg;
 		if (items_count(ITEM_GIANTFORK) && randf() < 0.10f * items_count(ITEM_GIANTFORK))   // megacrit
 			dmg *= items_megacrit_mult() / 2.0f;
@@ -713,7 +731,7 @@ void game_damage_enemy_ex(int idx, float dmg, vec3 knockDir, float knock, u32 fl
 	else audio_play_sfx(SFX_HIT);
 	passive_on_damage_dealt(idx, dmg);
 	if (procs) items_on_hit(idx, dmg, crit);
-	if (procs && g.stats.lifesteal > 0 && randf() < g.stats.lifesteal) game_heal(1);  // procs never re-proc (they pass DMG_NO_PROC)
+	if (procs && g.stats.lifesteal > 0 && randf() < g.stats.lifesteal) { game_heal(1); unlocks_count(CNT_LIFESTEAL_HEALING, 1); }  // procs never re-proc (they pass DMG_NO_PROC)
 }
 
 void game_damage_enemy(int idx, float dmg, vec3 knockDir, float knock)
@@ -747,9 +765,12 @@ void game_damage_player(float dmg)
 	}
 	if (weapons_try_block()) return;   // Aegis
 	if (passive_on_player_hit(&dmg)) return;   // Flex
+	float beforeArmor = dmg;
 	dmg *= 1.0f / (1.0f + g.stats.armor);
+	if (g.character == 2) unlocks_count(CNT_OOFIE_ARMOR_BLOCKED, (u32)(beforeArmor - dmg + 0.5f));   // Sir Oofie
 	dmg = items_on_player_damaged(dmg);
 	if (dmg <= 0) return;
+	unlocks_on_damage_taken();
 	g.shieldDelay = 4.0f;
 	if (g.shield > 0) {
 		float absorbed = fminf(g.shield, dmg);
@@ -765,6 +786,7 @@ void game_damage_player(float dmg)
 		if (items_on_fatal()) return;
 		g.hp = 0;
 		g.state = STATE_DEAD;
+		unlocks_count(CNT_DEATHS, 1);
 		profile_run_end(false);
 		run_save_delete();
 		audio_stop_music();
@@ -811,6 +833,7 @@ void game_roll_choices(void)
 			if (r < 0.2f && g.numWeapons < MAX_WEAPON_SLOTS) {
 				ch.kind = CHOICE_NEW_WEAPON;
 				ch.index = rand() % WEAPON_COUNT;
+				if (!unlocked_weapon(ch.index)) continue;
 				bool owned = false;
 				for (int w = 0; w < g.numWeapons; w++) owned |= g.weapons[w].id == ch.index;
 				if (owned) continue;
@@ -835,6 +858,7 @@ void game_roll_choices(void)
 			} else {
 				ch.kind = CHOICE_TOME;
 				ch.index = rand() % TOME_COUNT;
+				if (!unlocked_tome(ch.index)) continue;
 				if (!g.tomeLevels[ch.index] && g.numTomes >= MAX_TOME_SLOTS) continue;
 			}
 			bool dup = false;
@@ -1038,11 +1062,26 @@ static void player_update(float dt)
 	g.vel.y -= GRAVITY * dt;
 	float fall = passive_fall_limit();   // Float / Hoarder: hold jump to glide
 	if (fall > 0 && !g.grounded && (held & (KEY_A | KEY_B)) && g.vel.y < -fall) g.vel.y = -fall;
+	vec3 before = g.pos;
 	g.pos = v3_add(g.pos, v3_scale(g.vel, dt));
+
+	// terrain cliffs are walls (Monke climbs them); try sliding along one axis first
+	bool cliff = false;
+	if (terrain_wall(before, g.pos)) {
+		cliff = true;
+		vec3 tryX = v3(g.pos.x, g.pos.y, before.z), tryZ = v3(before.x, g.pos.y, g.pos.z);
+		if (!terrain_wall(before, tryX)) g.pos = tryX;
+		else if (!terrain_wall(before, tryZ)) g.pos = tryZ;
+		else { g.pos.x = before.x; g.pos.z = before.z; }
+	}
+	if (cliff && passive == PASSIVE_MONKEGRIP && mag > 0.3f) {
+		g.climbing = true;
+		g.vel.y = 9.0f;
+	}
 
 	// props are solid: walls below their top, floors on top
 	int wall = world_collide(&g.pos, PLAYER_RADIUS);
-	g.climbing = false;
+	if (!cliff) g.climbing = false;
 	if (wall >= 0 && passive == PASSIVE_MONKEGRIP && mag > 0.3f) {
 		// Monke Grip: pushing into a wall climbs it
 		vec3 c;
@@ -1059,6 +1098,8 @@ static void player_update(float dt)
 		}
 	}
 	g.groundY = world_ground(g.pos, PLAYER_RADIUS);
+	// stick to the ground when walking down slopes instead of hopping off them
+	if (g.grounded && g.vel.y <= 0 && g.pos.y > g.groundY && g.pos.y - g.groundY < 0.9f) g.pos.y = g.groundY;
 	if (g.pos.y <= g.groundY && g.vel.y <= 0) {
 		g.pos.y = g.groundY;
 		g.vel.y = 0;
@@ -1142,6 +1183,7 @@ static void fx_update(float dt)
 void game_update(float dt)
 {
 	g.realTime += dt;
+	unlocks_update(dt);
 	if (g.toastTime > 0) g.toastTime -= dt;
 	if (g.choiceLock > 0) g.choiceLock -= dt;
 	if (g.state != STATE_PLAYING) return;

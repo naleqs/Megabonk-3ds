@@ -2,6 +2,7 @@
 #include "mathutil.h"
 #include "audio.h"
 #include <string.h>
+#include "unlocks.h"
 
 // Names, icons and tiers come from the game's ItemData. Numbers follow the megabonk.org
 // item database where it lists them; the rest are hand-tuned (item code is IL2CPP).
@@ -149,6 +150,7 @@ static void apply_passive(ItemId id, float sign)
 
 void items_give(ItemId id)
 {
+	g.stageTookItems = true;   // Hero Sword unlock: beat a boss without items
 	if (g.itemCounts[id] == 0 && g.numItemKinds < MAX_OWNED_ITEMS)
 		g.itemOrder[g.numItemKinds++] = id;
 	if (g.itemCounts[id] < 255) g.itemCounts[id]++;
@@ -175,7 +177,7 @@ int items_roll(u8 rarity)
 {
 	int cand[ITEM_COUNT], n = 0;
 	for (int i = 0; i < ITEM_COUNT; i++)
-		if (g_itemDefs[i].rarity == rarity) cand[n++] = i;
+		if (g_itemDefs[i].rarity == rarity && unlocked_item(i)) cand[n++] = i;
 	return n ? cand[rand() % n] : 0;
 }
 
@@ -300,7 +302,7 @@ void items_on_hit(int idx, float dmg, bool crit)
 		return;
 	}
 	if (!e->active) at = e->pos;   // killed by the hit: procs still go off where it died
-	if (n_(ITEM_MOLDYCHEESE) && proc(0.40f)) poison(e, pdmg * n_(ITEM_MOLDYCHEESE), 3.0f);
+	if (n_(ITEM_MOLDYCHEESE) && proc(0.40f)) { poison(e, pdmg * n_(ITEM_MOLDYCHEESE), 3.0f); unlocks_count(CNT_MOLDY_CHEESE_PROCS, 1); }
 	if (n_(ITEM_SNEK)) {
 		e->poisonDps += pdmg * 0.4f * 4 * n_(ITEM_SNEK);   // 4 stacks
 		e->poisonTime = fmaxf(e->poisonTime, 3.0f);
@@ -315,6 +317,7 @@ void items_on_hit(int idx, float dmg, bool crit)
 	if (n_(ITEM_ICECRYSTAL) && proc(0.075f * n_(ITEM_ICECRYSTAL))) e->freezeTime = 1.5f;
 	if (n_(ITEM_ICECUBE) && proc(0.20f * n_(ITEM_ICECUBE))) {
 		e->freezeTime = 2.0f;
+		unlocks_count(CNT_ICECUBE_FREEZES, 1);
 		strike(at, 2.0f, 20 * g.stats.damageMult, COLOR(0.6f, 0.9f, 1), FX_RING);
 	}
 	if (n_(ITEM_UNSTABLETRANSFUSION) && e->active && proc(0.35f * n_(ITEM_UNSTABLETRANSFUSION))) bloodmark(e);
@@ -418,7 +421,10 @@ float items_on_player_damaged(float dmg)
 	}
 	float thorns = g.stats.thorns + (n_(ITEM_SPIKYSHIELD) ? g.stats.armor * 200 * n_(ITEM_SPIKYSHIELD) : 0);
 	if (thorns > 0) {
+		u8 src = g.dmgSource;
+		g.dmgSource = DMG_SRC_THORNS;
 		game_area_damage(g.pos, 3.0f, thorns * g.stats.damageMult, 0.5f, DMG_NO_PROC);
+		g.dmgSource = src;
 		if (n_(ITEM_QUINSMASK) && proc(0.30f * n_(ITEM_QUINSMASK)))
 			strike(g.pos, 6.0f, thorns * g.stats.damageMult, COLOR(1, 0.5f, 0.3f), FX_EXPLOSION);
 	}

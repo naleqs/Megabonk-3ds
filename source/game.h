@@ -105,6 +105,7 @@ typedef struct {
 	float bloodTimer;
 	float launched;      // Eagle Claw: knocked into the air (stunned, counts as airborne)
 	u16 cursedTick;      // Cursed Doll: last curse tick that hit this enemy
+	float spawnTime;     // g.time when it appeared (boss / miniboss timers)
 	// special attacks (attacks.c)
 	u8 atkState;         // 0 idle, 1 charging, 2 end lag
 	u8 atkCur;
@@ -276,7 +277,8 @@ typedef struct {
 	vec3 pos, vel;
 	float yaw;           // facing
 	bool grounded;
-	float groundY;       // surface height under the player (props can be stood on)
+	float groundY;       // surface height under the player (terrain or a prop top)
+	u32 terrainSeed;     // the stage's terrain (terrain.c); kept so a resumed run rebuilds the same map
 	bool climbing;       // Monke Grip: on a wall
 	float skateYaw, skateSpeed;   // Calcium rides a skateboard
 	bool skatePush;
@@ -299,6 +301,12 @@ typedef struct {
 	int jumpsLeft;
 	int aegisCharges;
 	float wCrit, wCritDmg, wKnock;   // damage context of the weapon currently hitting (weapons.c)
+	u8 dmgSource;                    // weapon id or DMG_SRC_* of the damage being dealt (unlocks)
+	// unlock tracking (unlocks.c)
+	float noHitTime;
+	bool runDamaged, stageTookItems;
+	int cursesThisStage, potsThisRun;
+	int microwaveItem, microwaveStreak;
 
 	// passive ability state (passives.c)
 	float passiveTimer[4];
@@ -381,6 +389,8 @@ typedef struct {
 	float swordSwing;     // > 0 while sword fx is visible
 	float swordYaw;
 	int menuCursor;
+	int recordsPage, recordsScroll;   // records / unlocks screen
+	float unlockAllHold;
 	char toast[64];
 	float toastTime;
 } Game;

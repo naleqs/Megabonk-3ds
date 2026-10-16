@@ -2,9 +2,11 @@
 #include <stdio.h>
 #include <string.h>
 #include "game.h"
+#include "terrain.h"
 #include "mathutil.h"
 #include "ui.h"
 #include "save.h"
+#include "unlocks.h"
 #include "audio.h"
 
 static C2D_TextBuf s_textBuf;
@@ -204,7 +206,7 @@ static void draw_pickups(void)
 			break;
 		case PICKUP_CHEST:
 			draw_shadow(p->pos, 1.2f);
-			render_mesh_at(g.meshChest, 0, v3(p->pos.x, 0, p->pos.z), p->bob * 0.3f, 0.8f, COLOR(1, 1, 1), (Color){ 0.15f, 0.12f, 0, 0 });
+			render_mesh_at(g.meshChest, 0, v3(p->pos.x, terrain_height(p->pos.x, p->pos.z), p->pos.z), p->bob * 0.3f, 0.8f, COLOR(1, 1, 1), (Color){ 0.15f, 0.12f, 0, 0 });
 			break;
 		}
 	}
@@ -336,7 +338,7 @@ static void draw_fx(void)
 			break;
 		case FX_LIGHTNING:
 			Mtx_Identity(&m);
-			Mtx_Translate(&m, f->pos.x, 0, f->pos.z, true);
+			Mtx_Translate(&m, f->pos.x, f->pos.y, f->pos.z, true);
 			Mtx_Scale(&m, 0.35f + 0.2f * (1 - t), 40, 0.35f + 0.2f * (1 - t));
 			render_mesh(&g_meshCylinder, 0, &m, c, (Color){ 0.6f, 0.9f, 1, 0 });
 			render_mesh_at(&g_meshRing, 0, v3_add(f->pos, v3(0, 0.15f, 0)), 0, f->size, c, emit);
@@ -383,18 +385,18 @@ static void draw_fx(void)
 			render_mesh_at(&g_meshRing, 0, v3_add(z->pos, v3(0, 0.15f, 0)), g.realTime, z->radius,
 			               (Color){ 0.3f, 0.9f, 0.2f, 0.5f * fade }, (Color){ 0.1f, 0.4f, 0.05f, 0 });
 			Mtx_Identity(&m);
-			Mtx_Translate(&m, z->pos.x, 0.1f, z->pos.z, true);
+			Mtx_Translate(&m, z->pos.x, z->pos.y + 0.1f, z->pos.z, true);
 			Mtx_Scale(&m, z->radius, 0.15f, z->radius);
 			render_mesh(&g_meshSphere, 0, &m, (Color){ 0.3f, 0.8f, 0.2f, 0.3f * fade }, (Color){ 0.1f, 0.3f, 0.05f, 0 });
 			break;
 		case ZONE_TORNADO:
 			Mtx_Identity(&m);
-			Mtx_Translate(&m, z->pos.x, 0, z->pos.z, true);
+			Mtx_Translate(&m, z->pos.x, z->pos.y, z->pos.z, true);
 			Mtx_RotateY(&m, g.realTime * 12, true);
 			Mtx_Scale(&m, z->radius, 6.0f, z->radius);
 			render_mesh(&g_meshCylinder, 0, &m, (Color){ 0.85f, 0.9f, 0.95f, 0.35f * fade }, (Color){ 0.3f, 0.3f, 0.3f, 0 });
 			Mtx_Identity(&m);
-			Mtx_Translate(&m, z->pos.x, 3, z->pos.z, true);
+			Mtx_Translate(&m, z->pos.x, z->pos.y + 3, z->pos.z, true);
 			Mtx_RotateY(&m, -g.realTime * 9, true);
 			Mtx_Scale(&m, z->radius * 1.5f, 4.0f, z->radius * 1.5f);
 			render_mesh(&g_meshCylinder, 0, &m, (Color){ 0.85f, 0.9f, 0.95f, 0.25f * fade }, (Color){ 0.3f, 0.3f, 0.3f, 0 });
@@ -402,7 +404,7 @@ static void draw_fx(void)
 		case ZONE_FIRE: {
 			float flick = 0.85f + 0.15f * sinf(g.realTime * 20 + i);
 			Mtx_Identity(&m);
-			Mtx_Translate(&m, z->pos.x, 0.1f, z->pos.z, true);
+			Mtx_Translate(&m, z->pos.x, z->pos.y + 0.1f, z->pos.z, true);
 			Mtx_Scale(&m, z->radius * flick, 0.5f * flick, z->radius * flick);
 			render_mesh(&g_meshSphere, 0, &m, (Color){ 1, 0.45f, 0.08f, 0.55f * fade }, (Color){ 0.9f, 0.35f, 0.05f, 0 });
 			break;
@@ -410,7 +412,7 @@ static void draw_fx(void)
 		case ZONE_MINE: {
 			bool blink = z->age < 0.5f || fmodf(z->age, 0.8f) < 0.15f;
 			Mtx_Identity(&m);
-			Mtx_Translate(&m, z->pos.x, 0.15f, z->pos.z, true);
+			Mtx_Translate(&m, z->pos.x, z->pos.y + 0.15f, z->pos.z, true);
 			Mtx_Scale(&m, 0.7f, 0.3f, 0.7f);
 			render_mesh(&g_meshSphere, 0, &m, (Color){ 0.25f, 0.25f, 0.28f, 1 }, NO_EMIT);
 			render_mesh_at(&g_meshSphere, 0, v3_add(z->pos, v3(0, 0.45f, 0)), 0, 0.18f,
@@ -453,10 +455,13 @@ static void setup_camera(C3D_Mtx* view)
 		eye = v3(sinf(a) * 11, 4.5f, cosf(a) * 11);
 	} else {
 		target = v3_add(g.pos, v3(0, 2.6f, 0));
+		// (eye is set below; raised out of hills afterwards)
 		float cp = cosf(g.camPitch), sp = sinf(g.camPitch);
 		eye = v3(g.pos.x - sinf(g.camYaw) * cp * g.camDist, g.pos.y + 2.0f + sp * g.camDist,
 		         g.pos.z - cosf(g.camYaw) * cp * g.camDist);
 	}
+	float floorY = terrain_height(eye.x, eye.z) + 1.2f;
+	if (eye.y < floorY) eye.y = floorY;
 	s_camPos = eye;
 	s_camFwd = v3_norm(v3(target.x - eye.x, 0, target.z - eye.z));
 	Mtx_LookAt(view, FVec3_New(eye.x, eye.y, eye.z), FVec3_New(target.x, target.y, target.z), FVec3_New(0, 1, 0), true);
@@ -513,6 +518,17 @@ void draw_hud_top(void)
 		ui_text_shadow(ch->name, 200, 8, 1.5f, WHITE, C2D_AlignCenter, true);
 		// passive ability
 		C2D_DrawRectSolid(10, 168, 0.5f, 380, 66, C2D_Color32(0, 0, 0, 150));
+		int u = unlock_find(UNL_CHARACTER, g.character);
+		if (!unlock_done(u)) {
+			ui_text_shadow("Locked", 18, 172, 0.6f, C2D_Color32(255, 120, 100, 255), 0, true);
+			u32 have, need;
+			unlock_progress(u, &have, &need);
+			char req[160];
+			if (need) snprintf(req, sizeof(req), "%s  (%lu / %lu)", g_unlockDefs[u].text, (unsigned long)have, (unsigned long)need);
+			else snprintf(req, sizeof(req), "%s", g_unlockDefs[u].text);
+			ui_text_wrap(req, 18, 192, 0.45f, WHITE, 364);
+			return;
+		}
 		snprintf(buf, sizeof(buf), "Passive: %s", g_passiveNames[ch->passive]);
 		ui_text_shadow(buf, 18, 172, 0.6f, C2D_Color32(140, 220, 255, 255), 0, true);
 		ui_text_wrap(g_passiveDescs[ch->passive], 18, 192, 0.45f, WHITE, 364);
@@ -586,6 +602,11 @@ void draw_hud_top(void)
 
 	if (g.toastTime > 0)
 		ui_text_shadow(g.toast, 200, 62, 0.58f, C2D_Color32(255, 230, 120, (u8)(clampf(g.toastTime, 0, 1) * 255)), C2D_AlignCenter, true);
+	const char* unlocked = unlocks_popup();
+	if (unlocked) {
+		C2D_DrawRectSolid(80, 40, 0.5f, 240, 18, C2D_Color32(20, 10, 40, 200));
+		ui_text_shadow(unlocked, 200, 41, 0.55f, C2D_Color32(150, 255, 150, 255), C2D_AlignCenter, true);
+	}
 
 	// interaction prompt
 	if (g.state == STATE_PLAYING) {
@@ -874,6 +895,10 @@ static void draw_char_select(void)
 		// starting weapon badge
 		C2D_DrawRectSolid(x + UI_CS_W - 17, y + UI_CS_H - 17, 0.5f, 17, 17, C2D_Color32(20, 10, 10, 200));
 		ui_image(g_weaponIcons[g_characters[i].startWeapon], x + UI_CS_W - 16.5f, y + UI_CS_H - 16.5f, 0.5f, false);
+		if (!unlocked_character(i)) {
+			C2D_DrawRectSolid(x, y + 11, 0.5f, UI_CS_W, UI_CS_H - 11, C2D_Color32(0, 0, 0, 185));
+			ui_text("LOCKED", x + UI_CS_W / 2.0f, y + 28, 0.32f, C2D_Color32(200, 200, 200, 255), C2D_AlignCenter, false);
+		}
 		if (sel) {
 			// pulsing 1P selection frame
 			u8 a = (u8)(200 + 55 * sinf(g.realTime * 8));
@@ -926,8 +951,44 @@ static void draw_stage_select(void)
 	ui_text("Left/Right: choose    A: start    B: back", 160, 222, 0.42f, HINT, C2D_AlignCenter, false);
 }
 
+static void draw_unlock_page(int kind)
+{
+	static const char* const titles[] = { "Characters", "Weapons", "Tomes", "Items" };
+	int list[MAX_UNLOCKS], n = 0, got = 0;
+	for (int u = 0; u < g_unlockCount; u++)
+		if (g_unlockDefs[u].kind == kind) { list[n++] = u; got += unlock_done(u); }
+	char line[160];
+	snprintf(line, sizeof(line), "%s  %d / %d", titles[kind], got, n);
+	ui_text(line, 160, 6, 0.7f, GOLD, C2D_AlignCenter, true);
+	const int rows = 6;
+	if (g.recordsScroll > n - rows) g.recordsScroll = n - rows;
+	if (g.recordsScroll < 0) g.recordsScroll = 0;
+	for (int r = 0; r < rows && g.recordsScroll + r < n; r++) {
+		int u = list[g.recordsScroll + r];
+		const UnlockDef* d = &g_unlockDefs[u];
+		float y = 30 + r * 31;
+		bool done = unlock_done(u);
+		const char* name = kind == UNL_CHARACTER ? g_characters[d->index].name : kind == UNL_WEAPON ? g_weaponDefs[d->index].name
+		                 : kind == UNL_TOME ? g_tomeNames[d->index] : g_itemDefs[d->index].name;
+		ui_text(name, 10, y, 0.5f, done ? GOLD : C2D_Color32(170, 170, 185, 255), 0, false);
+		ui_text(done ? "Unlocked" : "Locked", 310, y, 0.42f, done ? C2D_Color32(120, 230, 120, 255) : C2D_Color32(230, 120, 110, 255), C2D_AlignRight, false);
+		u32 have, need;
+		unlock_progress(u, &have, &need);
+		if (need && !done) snprintf(line, sizeof(line), "%s (%lu/%lu)", d->text, (unsigned long)have, (unsigned long)need);
+		else snprintf(line, sizeof(line), "%s", d->cond == 0 ? "Available from the start in this port" : d->text);
+		ui_text_fit(line, 160, y + 14, 0.36f, 300, DIM);
+	}
+	ui_text("L/R: page    Up/Down: scroll    B: back", 160, 214, 0.38f, HINT, C2D_AlignCenter, false);
+	if (g.unlockAllHold > 0)
+		snprintf(line, sizeof(line), "Unlocking everything... %d", (int)(3.99f - g.unlockAllHold));
+	else
+		snprintf(line, sizeof(line), "Hold SELECT for 3 s to unlock everything");
+	ui_text(line, 160, 226, 0.34f, g.unlockAllHold > 0 ? GOLD : HINT, C2D_AlignCenter, false);
+}
+
 static void draw_records(void)
 {
+	if (g.recordsPage > 0) { draw_unlock_page(g.recordsPage - 1); return; }
 	const SaveProfile* p = &g_profile;
 	char line[96], t[16];
 	ui_text("Records", 160, 6, 0.8f, GOLD, C2D_AlignCenter, true);
@@ -961,7 +1022,7 @@ static void draw_records(void)
 		if (++row >= 15) break;
 	}
 	if (!row) ui_text("(play a run to start)", 12, 146, 0.38f, DIM, 0, false);
-	ui_text("B: back", 160, 224, 0.5f, HINT, C2D_AlignCenter, false);
+	ui_text("L/R: unlocks    B: back", 160, 224, 0.5f, HINT, C2D_AlignCenter, false);
 }
 
 static void draw_menu_buttons(const char* const* labels, int n)

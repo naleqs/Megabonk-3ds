@@ -1,43 +1,17 @@
 #include "game.h"
+#include "terrain.h"
 #include "mathutil.h"
 #include <string.h>
 
-#define GROUND_TILES 26
-#define GROUND_TILE  8.0f
-#define GROUND_UV    0.125f   // texture repeats every 8 units
 #define CLIFF_HEIGHT 30.0f
 #define DRAW_DIST    105.0f
 
-static Mesh s_ground, s_cliffs;
+static Mesh s_cliffs;
 static bool s_built;
 
-#define GN (GROUND_TILES + 1)
 #define CLIFF_SEGS 14
-static float s_pn[GN * GN * 6], s_uv[GN * GN * 2];
-static u16 s_idx[GROUND_TILES * GROUND_TILES * 6];
-
-static void build_ground(void)
-{
-	int n = GN;
-	float half = GROUND_TILES * GROUND_TILE * 0.5f;
-	for (int z = 0; z < n; z++)
-		for (int x = 0; x < n; x++) {
-			int i = z * n + x;
-			float px = x * GROUND_TILE - half, pz = z * GROUND_TILE - half;
-			float* v = &s_pn[i * 6];
-			v[0] = px; v[1] = 0; v[2] = pz; v[3] = 0; v[4] = 1; v[5] = 0;
-			s_uv[i * 2] = px * GROUND_UV;
-			s_uv[i * 2 + 1] = pz * GROUND_UV;
-		}
-	u16* idx = s_idx;
-	for (int z = 0; z < GROUND_TILES; z++)
-		for (int x = 0; x < GROUND_TILES; x++) {
-			int a = z * n + x;
-			*idx++ = a; *idx++ = a + n; *idx++ = a + 1;
-			*idx++ = a + 1; *idx++ = a + n; *idx++ = a + n + 1;
-		}
-	mesh_from_floats(&s_ground, s_pn, s_uv, n * n, s_idx, GROUND_TILES * GROUND_TILES * 6, texture_get("ground"));
-}
+static float s_pn[4 * CLIFF_SEGS * 4 * 6], s_uv[4 * CLIFF_SEGS * 4 * 2];
+static u16 s_idx[4 * CLIFF_SEGS * 6];
 
 static void build_cliffs(void)
 {
@@ -90,12 +64,11 @@ static float prop_collision_radius(int def, float scale)
 void world_restore(void)
 {
 	if (!s_built) {
-		build_ground();
 		build_cliffs();
 		s_built = true;
 	}
-	s_ground.parts[0].tex = texture_get(STAGE->groundTex);
 	s_cliffs.parts[0].tex = texture_get(STAGE->cliffTex);
+	terrain_generate(g.terrainSeed);
 }
 
 void world_generate(void)
@@ -109,14 +82,16 @@ void world_generate(void)
 			p->def = d;
 			p->pos = v3(randrange(-MAP_HALF + 4, MAP_HALF - 4), 0, randrange(-MAP_HALF + 4, MAP_HALF - 4));
 			if (fabsf(p->pos.x) < 10 && fabsf(p->pos.z) < 10) continue; // keep spawn clear
+			if (terrain_slope(p->pos.x, p->pos.z) > 0.7f) continue;      // not on cliffs
+			p->pos.y = terrain_height(p->pos.x, p->pos.z) - 0.2f;
 			p->yaw = randf() * 6.2832f;
 			p->scale = randrange(g_propDefs[d].scaleMin, g_propDefs[d].scaleMax);
 			p->colRadius = prop_collision_radius(d, p->scale);
 			const Mesh* mesh = g.propMeshes[d];
-			p->top = mesh ? mesh->maxy * p->scale : 0;
+			p->top = p->pos.y + (mesh ? mesh->maxy * p->scale : 0);
 			p->topRadius = p->colRadius;
 			if (mesh && strstr(g_propDefs[d].mesh, "tree")) {   // stand on the canopy, not the trunk
-				p->top *= 0.92f;
+				p->top = p->pos.y + mesh->maxy * p->scale * 0.92f;
 				p->topRadius = fmaxf(p->colRadius, mesh->radius * p->scale * 0.45f);
 			}
 			g.numProps++;
@@ -172,7 +147,7 @@ int world_collide(vec3* pos, float radius)
 
 float world_ground(vec3 pos, float radius)
 {
-	float best = 0;
+	float best = terrain_height(pos.x, pos.z);
 	for (int i = 0; i < g.numProps + g.numInteract; i++) {
 		vec3 c;
 		float r, top;
@@ -195,14 +170,9 @@ void world_draw(vec3 camPos, vec3 camFwd)
 {
 	Color white = COLOR(1, 1, 1), none = { 0, 0, 0, 0 };
 
-	// ground follows the player, snapped to the texture period so it doesn't swim
-	float snap = GROUND_TILE;
-	C3D_Mtx m;
-	Mtx_Identity(&m);
-	float gx = floorf(g.pos.x / snap) * snap, gz = floorf(g.pos.z / snap) * snap;
-	Mtx_Translate(&m, gx, 0, gz, true);
-	render_mesh(&s_ground, 0, &m, white, none);
+	terrain_draw();
 
+	C3D_Mtx m;
 	Mtx_Identity(&m);
 	render_mesh(&s_cliffs, 0, &m, COLOR(0.85f, 0.85f, 0.85f), none);
 

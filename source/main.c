@@ -8,6 +8,7 @@
 #include "audio.h"
 #include "mathutil.h"
 #include "save.h"
+#include "unlocks.h"
 
 static C3D_RenderTarget *s_top, *s_bottom;
 float g_fps;
@@ -81,9 +82,24 @@ static bool handle_input(void)
 		if (pick == 3 || (down & KEY_START)) return false;
 		break;
 	}
-	case STATE_RECORDS:
-		if (down & (KEY_B | KEY_A) || tap) { g.state = STATE_TITLE; audio_play_sfx(SFX_MENU); }
+	case STATE_RECORDS: {
+		// page 0: records, 1-4: character / weapon / tome / item unlocks
+		int page = g.recordsPage;
+		if (down & (KEY_R | KEY_DRIGHT | KEY_CPAD_RIGHT)) page = (page + 1) % 5;
+		if (down & (KEY_L | KEY_DLEFT | KEY_CPAD_LEFT)) page = (page + 4) % 5;
+		if (page != g.recordsPage) { g.recordsPage = page; g.recordsScroll = 0; audio_play_sfx(SFX_MENU); }
+		if (down & (KEY_DDOWN | KEY_CPAD_DOWN)) g.recordsScroll++;
+		if (down & (KEY_DUP | KEY_CPAD_UP)) g.recordsScroll--;
+		u32 held = hidKeysHeld();
+		if (page > 0 && (held & KEY_SELECT)) {
+			g.unlockAllHold += 1.0f / 60.0f;
+			if (g.unlockAllHold >= 3.0f) { unlock_everything(); g.unlockAllHold = 0; audio_play_sfx(SFX_LEVELUP); }
+		} else {
+			g.unlockAllHold = 0;
+		}
+		if (down & KEY_B) { g.state = STATE_TITLE; g.recordsPage = 0; audio_play_sfx(SFX_MENU); }
 		break;
+	}
 	case STATE_CHARSELECT: {
 		int c = g.character;
 		if (down & (KEY_DRIGHT | KEY_CPAD_RIGHT)) c = (c + 1) % CHARACTER_COUNT;
@@ -105,6 +121,7 @@ static bool handle_input(void)
 			audio_play_sfx(SFX_MENU);
 		}
 		if (down & KEY_B) g.state = STATE_TITLE;
+		if (start && !unlocked_character(g.character)) { audio_play_sfx(SFX_MENU); start = false; }   // locked
 		if (start) { audio_play_sfx(SFX_SELECT); g.state = STATE_STAGESELECT; g.choiceLock = 0.25f; }
 		break;
 	}
@@ -228,6 +245,7 @@ static bool handle_input(void)
 			if (touched_rect(t, UI_BTN_X, UI_BTN_Y0 + i * UI_BTN_STEP, UI_BTN_W, UI_BTN_H)) pick = i;
 		if (pick == 0) g.state = STATE_PLAYING;
 		if (pick == 1) {
+			profile_save();
 			if (run_save()) { go_title(); game_toast("Run saved"); }
 			else game_toast("Couldn't write to the SD card");
 		}
@@ -281,6 +299,7 @@ int main(int argc, char* argv[])
 	hud_init();
 	draw_loading();
 	save_init();
+	unlocks_init();
 	audio_init();
 	srand(osGetTime());
 	go_title();
