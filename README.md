@@ -22,7 +22,11 @@ The builder:
 4. compiles `output/3ds/megabonk3ds/megabonk3ds.3dsx`
 5. deletes the temporary environment (`--keep-env` keeps it, for debugging)
 
-It takes a while (baking 21 animated characters is the slow part). Nothing is installed system-wide.
+It takes a while (baking 21 animated characters is the slow part). Everything it downloads stays in the
+temporary environment, with one exception on Windows: the asset-extraction libraries need the
+**Microsoft Visual C++ 2015-2022 Redistributable** (version 14 or newer). If it isn't installed, the builder
+downloads it from Microsoft and installs it (Windows asks for permission); `--no-vcredist` skips this if you'd
+rather [install it yourself](https://aka.ms/vs/17/release/vc_redist.x64.exe).
 
 ## Installing on a 3DS
 
@@ -32,6 +36,12 @@ Sound needs `sdmc:/3ds/dspfirm.cdc` (run DSP1 once if you don't have it).
 
 The `.3dsx` contains assets converted from your copy of the game: keep it for yourself
 and don't upload or share it.
+
+Saves go next to the app: `sdmc:/3ds/megabonk3ds/profile.sav` keeps your records (runs, wins, best
+times, furthest stage per map, wins per character) and `run.sav` holds a run you left with
+**Pause → Save & quit**; pick **Continue run** on the title screen to pick it up again. A saved run can be
+resumed once, and only with the same build of the game (rebuilding makes old run saves unusable; records
+are kept).
 
 ## Controls
 
@@ -48,9 +58,11 @@ and don't upload or share it.
 
 ## What's in it
 
-- Forest, Desert and Graveyard stages with their props, lighting and enemy timelines from the game data
+- Forest, Desert and Graveyard with their props, lighting and enemy timelines from the game data
   (a new enemy type joins every minute once its spawn time has passed; minibosses and swarms on the
   game's schedule; the Final Swarm's ghosts turn black, purple and red the longer you stay)
+- Forest and Desert runs go on for three stages: beat the boss, then continue with all your weapons,
+  tomes, items and stats, using the game's stage 2 and 3 timers, events and bosses
 - All 21 characters with their animations, starting weapons and passive abilities
   (Calcium rides his skateboard with momentum, Monke climbs rocks, trees and shrines, Birdo floats)
 - Rocks, trees, houses and shrines are solid: you can jump on top of them
@@ -66,7 +78,8 @@ and don't upload or share it.
 Item, tome and passive numbers that aren't stored in the game's data files (they live in compiled
 code) follow the [megabonk.org database](https://megabonk.org/database/) where it lists them, and are
 estimated otherwise. Not in the port yet: Wizard's Hat, Beacon and Pumpkin (they need tome level caps
-or later stages), the Scythe's charged attack, saves and unlocks.
+or stage-to-stage map changes), the Scythe's charged attack, and unlocks
+(everything is available from the start).
 
 [中文说明](README.zh-CN.md)
 

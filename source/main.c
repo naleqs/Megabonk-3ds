@@ -7,10 +7,12 @@
 #include "ui.h"
 #include "audio.h"
 #include "mathutil.h"
+#include "save.h"
 
 static C3D_RenderTarget *s_top, *s_bottom;
 float g_fps;
 static const u32 CLEAR_BOTTOM = 0xFF1E1418; // ABGR
+static void draw_loading(void);
 
 static bool touched_rect(touchPosition t, float x, float y, float w, float h)
 {
@@ -33,7 +35,7 @@ static void preview_stage(int stage)
 
 static void go_title(void)
 {
-	int ch = g.character, st = g.stage;
+	int ch = g.character, st = game_first_stage(g.stage);
 	memset(&g, 0, sizeof(g));
 	game_preload();
 	g.character = ch;
@@ -60,15 +62,28 @@ static bool handle_input(void)
 
 	switch (g.state) {
 	case STATE_TITLE: {
-		menu_move(&g.menuCursor, 2, down);
+		// [Continue run,] Play, Records, Exit
+		bool resume = run_save_exists();
+		int n = resume ? 4 : 3;
+		menu_move(&g.menuCursor, n, down);
 		int pick = -1;
 		if (down & KEY_A) pick = g.menuCursor;
-		for (int i = 0; i < 2 && tap; i++)
+		for (int i = 0; i < n && tap; i++)
 			if (touched_rect(t, UI_BTN_X, UI_BTN_Y0 + i * UI_BTN_STEP, UI_BTN_W, UI_BTN_H)) pick = i;
-		if (pick == 0) { g.state = STATE_CHARSELECT; audio_play_sfx(SFX_SELECT); }
-		if (pick == 1 || (down & KEY_START)) return false;
+		if (pick >= 0 && !resume) pick++;   // same meaning for both layouts
+		if (pick == 0) {
+			audio_play_sfx(SFX_SELECT);
+			draw_loading();
+			if (!run_load()) { go_title(); game_toast("Couldn't load the saved run"); }
+		}
+		if (pick == 1) { g.state = STATE_CHARSELECT; audio_play_sfx(SFX_SELECT); }
+		if (pick == 2) { g.state = STATE_RECORDS; audio_play_sfx(SFX_SELECT); }
+		if (pick == 3 || (down & KEY_START)) return false;
 		break;
 	}
+	case STATE_RECORDS:
+		if (down & (KEY_B | KEY_A) || tap) { g.state = STATE_TITLE; audio_play_sfx(SFX_MENU); }
+		break;
 	case STATE_CHARSELECT: {
 		int c = g.character;
 		if (down & (KEY_DRIGHT | KEY_CPAD_RIGHT)) c = (c + 1) % CHARACTER_COUNT;
@@ -96,10 +111,10 @@ static bool handle_input(void)
 	case STATE_STAGESELECT: {
 		if (g.choiceLock > 0) break;
 		int s = g.stageCursor;
-		if (down & (KEY_DRIGHT | KEY_CPAD_RIGHT)) s = (s + 1) % STAGE_COUNT;
-		if (down & (KEY_DLEFT | KEY_CPAD_LEFT)) s = (s + STAGE_COUNT - 1) % STAGE_COUNT;
+		if (down & (KEY_DRIGHT | KEY_CPAD_RIGHT)) s = (s + 1) % STAGE_SELECT_COUNT;
+		if (down & (KEY_DLEFT | KEY_CPAD_LEFT)) s = (s + STAGE_SELECT_COUNT - 1) % STAGE_SELECT_COUNT;
 		bool start = down & KEY_A;
-		for (int i = 0; i < STAGE_COUNT && tap; i++)
+		for (int i = 0; i < STAGE_SELECT_COUNT && tap; i++)
 			if (touched_rect(t, UI_STAGE_X(i), UI_STAGE_Y, UI_STAGE_W, UI_STAGE_H)) {
 				if (s == i) start = true;
 				s = i;
@@ -110,7 +125,12 @@ static bool handle_input(void)
 			audio_play_sfx(SFX_MENU);
 		}
 		if (down & KEY_B) g.state = STATE_CHARSELECT;
-		if (start) { audio_play_sfx(SFX_SELECT); game_new_run(g.character, g.stageCursor); }
+		if (start) {
+			audio_play_sfx(SFX_SELECT);
+			run_save_delete();   // starting over replaces a suspended run
+			game_new_run(g.character, g.stageCursor);
+			profile_run_start();
+		}
 		break;
 	}
 	case STATE_PLAYING:
@@ -199,18 +219,37 @@ static bool handle_input(void)
 		break;
 	}
 	case STATE_PAUSED: {
-		menu_move(&g.menuCursor, 2, down);
+		// Resume, Save & quit, Quit run
+		menu_move(&g.menuCursor, 3, down);
 		int pick = -1;
 		if (down & KEY_A) pick = g.menuCursor;
 		if (down & (KEY_START | KEY_B)) pick = 0;
-		for (int i = 0; i < 2 && tap; i++)
+		for (int i = 0; i < 3 && tap; i++)
 			if (touched_rect(t, UI_BTN_X, UI_BTN_Y0 + i * UI_BTN_STEP, UI_BTN_W, UI_BTN_H)) pick = i;
 		if (pick == 0) g.state = STATE_PLAYING;
-		if (pick == 1) go_title();
+		if (pick == 1) {
+			if (run_save()) { go_title(); game_toast("Run saved"); }
+			else game_toast("Couldn't write to the SD card");
+		}
+		if (pick == 2) { profile_run_end(false); go_title(); }
 		break;
 	}
-	case STATE_DEAD:
 	case STATE_WIN:
+		if (g.choiceLock > 0) break;
+		if (STAGE->next >= 0) {
+			// stage cleared: A / top button continues the run, B / bottom button ends it
+			int pick = -1;
+			if (down & KEY_A) pick = 0;
+			if (down & KEY_B) pick = 1;
+			for (int i = 0; i < 2 && tap; i++)
+				if (touched_rect(t, UI_BTN_X, UI_BTN_Y0 + 60 + i * UI_BTN_STEP, UI_BTN_W, UI_BTN_H)) pick = i;
+			if (pick == 0) { audio_play_sfx(SFX_SELECT); game_next_stage(); }
+			if (pick == 1) { profile_run_end(false); go_title(); }
+			break;
+		}
+		if (down & (KEY_A | KEY_START) || tap) go_title();
+		break;
+	case STATE_DEAD:
 		if (down & (KEY_A | KEY_START) || tap) go_title();
 		break;
 	}
@@ -241,6 +280,7 @@ int main(int argc, char* argv[])
 	render_init();
 	hud_init();
 	draw_loading();
+	save_init();
 	audio_init();
 	srand(osGetTime());
 	go_title();

@@ -744,10 +744,19 @@ ATTACK_KINDS = {
 }
 
 STAGES = [  # (id, StageData asset, EnemyData.maps bit, fallback display name, music, boss music)
+    # the first STAGE_SELECT_COUNT entries are the stage-select choices; the rest are later stages of a run
     ("forest", "StageForest1", 1, "Forest", "MUSIC_FOREST", "MUSIC_FOREST_BOSS"),
     ("desert", "StageDesert1", 2, "Desert", "MUSIC_DESERT", "MUSIC_DESERT_BOSS"),
     ("graveyard", "StageGraveyard", 8, "Graveyard", "MUSIC_GRAVEYARD", "MUSIC_GRAVEYARD_BOSS"),
+    ("forest2", "StageForest2", 1, "Forest", "MUSIC_FOREST", "MUSIC_FOREST_BOSS"),
+    ("forest3", "StageForest3", 1, "Forest", "MUSIC_FOREST", "MUSIC_FOREST_BOSS"),
+    ("desert2", "StageDesert2", 2, "Desert", "MUSIC_DESERT", "MUSIC_DESERT_BOSS"),
+    ("desert3", "StageDesert3", 2, "Desert", "MUSIC_DESERT", "MUSIC_DESERT_BOSS"),
 ]
+STAGE_SELECT_COUNT = 3
+# a run continues to the next stage after its boss
+STAGE_NEXT = {"forest": "forest2", "forest2": "forest3", "desert": "desert2", "desert2": "desert3"}
+STAGE_NUMBER = {"forest2": 2, "forest3": 3, "desert2": 2, "desert3": 3}
 STAGE_ICONS = {"forest": "ForestIconBig", "desert": "DesertIconBig", "graveyard": "GraveyardIconBig"}
 
 
@@ -911,7 +920,9 @@ def write_tables(ctx, chars, enemies, stages, props):
             L.append(f"\t{{ {ev['eTimelineEvent']}, {ev['timeMinutes']:.2f}f, {ev['duration']:.1f}f, "
                      f"{arr4(e)}, {min(len(e), 4)} }},")
         L.append("};")
+    order = [s["id"] for s in stages]
     L.append(f"#define STAGE_COUNT {len(stages)}")
+    L.append(f"#define STAGE_SELECT_COUNT {min(STAGE_SELECT_COUNT, len(stages))}")
     L.append("static const StageDef g_stages[STAGE_COUNT] = {")
     for s in stages:
         st, tl = s["st"], s["st"]["stageTimeline"]
@@ -919,12 +930,15 @@ def write_tables(ctx, chars, enemies, stages, props):
         minis = ids(tl.get("minibosses", []))
         boss_o = ctx.resolve(s["af"], tl["boss"])
         boss = idx.get(boss_o.read_typetree()["m_Name"], -1) if boss_o is not None else -1
-        L.append(f'\t{{ {c_str(s["name"])}, "stage_{s["id"]}", {s["bit"]}, {tl["stageTime"]:.1f}f, '
+        icon = next((k for k in STAGE_ICONS if s["id"].startswith(k)), s["id"])
+        L.append(f'\t{{ {c_str(s["name"])}, "stage_{icon}", {s["bit"]}, {tl["stageTime"]:.1f}f, '
                  f'{tl["checkNewEnemyInterval"]:.1f}f, {rgb(st["fogColor"])}, {rgb(st["ambienceColor"])}, '
                  f'{rgb(st["lightColor"])}, "ground_{s["id"]}", "cliff_{s["id"]}", {arr4(start)}, '
                  f'{min(len(start), 4)}, g_events_{s["id"]}, {len(tl["events"])}, {arr4(minis)}, '
                  f'{min(len(minis), 4)}, {boss}, {s["prop_first"]}, {s["prop_count"]}, '
-                 f'{s["music"]}, {s["boss_music"]} }},')
+                 f'{s["music"]}, {s["boss_music"]}, '
+                 f'{order.index(STAGE_NEXT[s["id"]]) if STAGE_NEXT.get(s["id"]) in order else -1}, '
+                 f'{STAGE_NUMBER.get(s["id"], 1)} }},')
     L.append("};")
     (GEN / "assets_gen.h").write_text("\n".join(L) + "\n")
 

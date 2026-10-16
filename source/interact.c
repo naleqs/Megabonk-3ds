@@ -37,10 +37,15 @@ static int chest_price(void)
 	return (int)(12.0f * powf(1.2f, (float)g.chestsOpened) * (1.0f + g.time / 900.0f) + 0.5f);
 }
 
-void interact_generate(void)
+void interact_relink(void)
 {
 	for (int k = 0; k < INT_KIND_COUNT; k++)
 		g.interactMeshes[k] = mesh_load(s_defs[k].mesh);
+}
+
+void interact_generate(void)
+{
+	interact_relink();
 	g.numInteract = 0;
 	g.nearInteract = -1;
 	g.challengeIndex = -1;

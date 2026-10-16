@@ -23,7 +23,7 @@ Mesh g_meshSphere, g_meshRing, g_meshQuad, g_meshGem, g_meshCylinder, g_meshCone
 // --------------------------------------------------------------------------- caches
 
 #define MAX_TEXTURES 384
-#define MAX_MESHES 96
+#define MAX_MESHES 256
 
 static struct { char name[32]; C3D_Tex tex; u16 usedW, usedH; } s_textures[MAX_TEXTURES];
 static int s_numTextures;

@@ -256,15 +256,18 @@ typedef enum {
 	STATE_SHOP,       // Shady Guy
 	STATE_MICROWAVE,  // pick an item to clone
 	STATE_STAGESELECT,
+	STATE_RECORDS,    // lifetime records (save.c)
 } GameState;
 
 #define STAGE (&g_stages[g.stage])
-#define MENU_STATE(s) ((s) == STATE_TITLE || (s) == STATE_CHARSELECT || (s) == STATE_STAGESELECT)
+#define MENU_STATE(s) ((s) == STATE_TITLE || (s) == STATE_CHARSELECT || (s) == STATE_STAGESELECT || (s) == STATE_RECORDS)
 
 typedef struct {
 	GameState state;
 	int character;
 	int stage;           // index into g_stages
+	float runTime;       // total time over all stages of the run
+	bool runRecorded;    // this run's result is already in the profile
 	int stageCursor;     // stage select screen
 	float time;          // run time in seconds
 	float realTime;
@@ -390,6 +393,9 @@ void game_preload(void);
 void game_select_character(int character);
 Mesh* game_displayed_character(void);
 void game_new_run(int character, int stage);
+void game_next_stage(void);       // after the boss: same character, weapons, tomes, items and stats
+void game_restore_after_load(void);   // re-link meshes/textures/music after a run save is read into g
+int  game_first_stage(int stage); // the stage-select stage a run through `stage` started from
 void game_poll_character(void);   // finishes background character loads (call outside a frame)
 
 // passives.c
@@ -451,6 +457,7 @@ int  weapons_orbiters(vec3* out, int max);   // Chunkers rock positions (for dra
 
 // interact.c
 void interact_generate(void);
+void interact_relink(void);       // mesh pointers only (resumed run)
 bool interact_solid(int i, float* radius, float* top);
 void interact_update(float dt);
 void interact_use(void);           // X pressed
@@ -463,6 +470,7 @@ void microwave_use(int ownedSlot);
 
 // world.c
 void world_generate(void);
+void world_restore(void);         // stage textures for an already-generated map (resumed run)
 void world_clear_area(vec3 pos, float radius);
 int  world_collide(vec3* pos, float radius);       // pushes out of solids below pos.y; returns the solid hit or -1
 bool world_solid(int i, vec3* pos, float* radius, float* top);   // solid i (props, then interactables)

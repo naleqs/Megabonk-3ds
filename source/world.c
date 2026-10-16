@@ -87,7 +87,7 @@ static float prop_collision_radius(int def, float scale)
 	return 0;
 }
 
-void world_generate(void)
+void world_restore(void)
 {
 	if (!s_built) {
 		build_ground();
@@ -96,6 +96,11 @@ void world_generate(void)
 	}
 	s_ground.parts[0].tex = texture_get(STAGE->groundTex);
 	s_cliffs.parts[0].tex = texture_get(STAGE->cliffTex);
+}
+
+void world_generate(void)
+{
+	world_restore();
 	g.numProps = 0;
 	for (int d = STAGE->propFirst; d < STAGE->propFirst + STAGE->propCount; d++) {
 		int amount = (int)(g_propDefs[d].amount * 0.6f);

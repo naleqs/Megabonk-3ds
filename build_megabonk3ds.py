@@ -12,16 +12,21 @@ What it does:
   4. compiles the game into output/3ds/megabonk3ds/megabonk3ds.3dsx
   5. deletes the temporary environment again (use --keep-env to keep it for debugging)
 
-Nothing is installed system-wide. Needs Python 3.9+ and an internet connection
-(for the Python packages and the devkitPro toolchain).
+Needs Python 3.9+ and an internet connection (for the Python packages and the devkitPro toolchain).
+Everything it downloads stays in the temporary environment, with one exception: on Windows the
+Microsoft Visual C++ 2015-2022 Redistributable (14.x) is required by the asset-extraction libraries,
+and if it isn't installed yet the builder downloads it from Microsoft and installs it (Windows asks for
+permission). Use --no-vcredist to skip that step.
 """
 import argparse
 import os
+import platform
 import shutil
 import stat
 import subprocess
 import sys
 import time
+import urllib.request
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -101,6 +106,65 @@ def find_game(explicit):
     sys.exit("Couldn't find Megabonk. Install it through Steam, or pass --game-dir <folder with Megabonk_Data>.")
 
 
+# --------------------------------------------------------------------------- VC++ runtime (Windows)
+
+VCREDIST_MIN_MAJOR = 14
+VCREDIST_URLS = {   # Microsoft's permanent links to the latest 2015-2022 redistributable
+    "x64": "https://aka.ms/vs/17/release/vc_redist.x64.exe",
+    "x86": "https://aka.ms/vs/17/release/vc_redist.x86.exe",
+    "arm64": "https://aka.ms/vs/17/release/vc_redist.arm64.exe",
+}
+
+
+def python_arch():
+    """The runtime has to match the Python interpreter (its native extensions load it)."""
+    machine = platform.machine().lower()
+    if machine in ("arm64", "aarch64"):
+        return "arm64"
+    return "x64" if sys.maxsize > 2 ** 32 else "x86"
+
+
+def vcredist_version(arch):
+    """Installed VC++ 14.x runtime version as a tuple, or None."""
+    import winreg
+    key = rf"SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\{arch}"
+    for view in (winreg.KEY_WOW64_64KEY, winreg.KEY_WOW64_32KEY):
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key, 0, winreg.KEY_READ | view) as k:
+                if not winreg.QueryValueEx(k, "Installed")[0]:
+                    continue
+                major = int(winreg.QueryValueEx(k, "Major")[0])
+                minor = int(winreg.QueryValueEx(k, "Minor")[0])
+                return (major, minor)
+        except OSError:
+            continue
+    return None
+
+
+def ensure_vcredist(download_dir: Path):
+    if sys.platform != "win32":
+        return
+    arch = python_arch()
+    have = vcredist_version(arch)
+    if have and have[0] >= VCREDIST_MIN_MAJOR:
+        log(f"Visual C++ runtime {have[0]}.{have[1]} ({arch}) is installed")
+        return
+    log(f"the Visual C++ 2015-2022 Redistributable ({arch}) is missing; installing it")
+    exe = download_dir / f"vc_redist.{arch}.exe"
+    urllib.request.urlretrieve(VCREDIST_URLS[arch], exe)
+    # /passive shows a progress bar without questions; Windows asks for admin rights (UAC)
+    r = subprocess.run([str(exe), "/install", "/passive", "/norestart"])
+    # 0 = installed, 1638 = a newer version is already there, 3010 = installed, reboot pending
+    if r.returncode not in (0, 1638, 3010):
+        sys.exit(f"Installing the Visual C++ Redistributable failed (exit {r.returncode}). "
+                 f"Install it yourself from {VCREDIST_URLS[arch]} and run the builder again.")
+    if r.returncode == 3010:
+        log("the Visual C++ Redistributable was installed (Windows wants a restart later; the build continues)")
+    have = vcredist_version(arch)
+    if not have or have[0] < VCREDIST_MIN_MAJOR:
+        log("warning: the Visual C++ runtime still isn't reported as installed; continuing anyway")
+
+
 # --------------------------------------------------------------------------- environment
 
 def run(cmd, env=None, cwd=None):
@@ -139,6 +203,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--game-dir", help="folder containing Megabonk_Data (default: find it through Steam)")
     ap.add_argument("--keep-env", action="store_true", help="don't delete the temporary build environment")
+    ap.add_argument("--no-vcredist", action="store_true",
+                    help="Windows: don't install the Visual C++ Redistributable if it's missing")
     args = ap.parse_args()
 
     if sys.version_info < (3, 9):
@@ -153,6 +219,8 @@ def main():
     env_dir.mkdir()
     log(f"temporary environment: {env_dir}")
     try:
+        if not args.no_vcredist:
+            ensure_vcredist(env_dir)
         work = env_dir / "work"
         for d in COPY_DIRS:
             shutil.copytree(HERE / d, work / d, ignore=shutil.ignore_patterns("gen", "__pycache__"))

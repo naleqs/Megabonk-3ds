@@ -3,6 +3,7 @@
 #include "audio.h"
 #include <string.h>
 #include <stdio.h>
+#include "save.h"
 
 Game g;
 
@@ -241,6 +242,68 @@ void game_new_run(int character, int stage)
 	g.gold = 500;
 #endif
 	audio_play_music(STAGE->music);
+}
+
+void game_restore_after_load(void)
+{
+	game_preload();
+	for (int k = 0; k < INT_KIND_COUNT; k++) g.interactMeshes[k] = NULL;
+	interact_relink();
+	g.charMesh = load_character_now(g.character);
+	g.revealText = NULL;
+	g.menuCursor = 0;   // back to "Resume"
+	world_restore();
+	render_set_fog_color(STAGE->fog[0], STAGE->fog[1], STAGE->fog[2]);
+	audio_play_music(g.bossSpawned && !g.bossDead ? STAGE->bossMusic : STAGE->music);
+}
+
+int game_first_stage(int stage)
+{
+	for (int s = 0; s < STAGE_SELECT_COUNT; s++)
+		for (int k = s; k >= 0; k = g_stages[k].next)
+			if (k == stage) return s;
+	return 0;
+}
+
+// Continue the run on the next stage: a fresh map, everything the player has carries over.
+void game_next_stage(void)
+{
+	static Game keep;   // big: keep it out of the stack
+	int next = STAGE->next;
+	if (next < 0) return;
+	keep = g;
+	game_new_run(keep.character, next);
+	g.runTime = keep.runTime;
+	g.hp = keep.hp;
+	g.shield = keep.shield;
+	g.level = keep.level;
+	g.xp = keep.xp;
+	g.xpNext = keep.xpNext;
+	g.kills = keep.kills;
+	g.gold = keep.gold;
+	g.stats = keep.stats;
+	memcpy(g.weapons, keep.weapons, sizeof(g.weapons));
+	g.numWeapons = keep.numWeapons;
+	for (int i = 0; i < g.numWeapons; i++) g.weapons[i].burstLeft = 0;
+	memcpy(g.tomeLevels, keep.tomeLevels, sizeof(g.tomeLevels));
+	memcpy(g.tomeSlots, keep.tomeSlots, sizeof(g.tomeSlots));
+	g.numTomes = keep.numTomes;
+	memcpy(g.itemCounts, keep.itemCounts, sizeof(g.itemCounts));
+	memcpy(g.itemOrder, keep.itemOrder, sizeof(g.itemOrder));
+	g.numItemKinds = keep.numItemKinds;
+	g.killStacks = keep.killStacks;
+	g.cardChests = keep.cardChests;
+	g.joeStacks = keep.joeStacks;
+	g.flexBuff = keep.flexBuff;
+	g.aegisCharges = keep.aegisCharges;
+	g.rerolls = keep.rerolls;
+	g.difficulty = keep.difficulty;
+	g.camYaw = keep.camYaw;
+	g.camPitch = keep.camPitch;
+	g.camDist = keep.camDist;
+	char buf[48];
+	snprintf(buf, sizeof(buf), "%s - Stage %d", STAGE->name, STAGE->number);
+	game_toast(buf);
 }
 
 // ---------------------------------------------------------------- enemies
@@ -620,6 +683,9 @@ static void enemy_kill(int idx)
 		g.bossDead = true;
 		g.bossIndex = -1;
 		g.state = STATE_WIN;
+		g.choiceLock = 1.0f;   // don't skip the stage-clear screen with a held button
+		profile_stage_cleared();
+		if (STAGE->next < 0) profile_run_end(true);   // the last stage: the run is won
 		audio_play_sfx(SFX_LEVELUP);
 	}
 }
@@ -699,6 +765,8 @@ void game_damage_player(float dmg)
 		if (items_on_fatal()) return;
 		g.hp = 0;
 		g.state = STATE_DEAD;
+		profile_run_end(false);
+		run_save_delete();
 		audio_stop_music();
 	}
 }
@@ -1105,6 +1173,7 @@ void game_update(float dt)
 	pickups_update(dt);
 	fx_update(dt);
 
+	g.runTime += dt;
 	if (g.state == STATE_PLAYING && g.pendingLevels > 0) {
 		g.pendingLevels--;
 		game_roll_choices();

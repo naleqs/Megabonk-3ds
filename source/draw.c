@@ -4,6 +4,7 @@
 #include "game.h"
 #include "mathutil.h"
 #include "ui.h"
+#include "save.h"
 #include "audio.h"
 
 static C2D_TextBuf s_textBuf;
@@ -501,7 +502,7 @@ void draw_hud_top(void)
 	char buf[96];
 	C2D_TextBufClear(s_textBuf);
 
-	if (g.state == STATE_TITLE) {
+	if (g.state == STATE_TITLE || g.state == STATE_RECORDS) {
 		if (!ui_image("ui_logo", 200, 52, 1.0f, true))
 			ui_text_shadow("MEGABONK", 200, 30, 2.2f, GOLD, C2D_AlignCenter, true);
 		ui_text_shadow("3DS", 200, 92, 1.0f, GOLD, C2D_AlignCenter, true);
@@ -904,7 +905,7 @@ static void draw_stage_select(void)
 	                  C2D_Color32(4, 4, 12, 255), C2D_Color32(4, 4, 12, 255));
 	ui_text("Choose a stage", 160, 8, 0.8f, GOLD, C2D_AlignCenter, true);
 	char buf[48];
-	for (int i = 0; i < STAGE_COUNT; i++) {
+	for (int i = 0; i < STAGE_SELECT_COUNT; i++) {
 		const StageDef* s = &g_stages[i];
 		float x = UI_STAGE_X(i), y = UI_STAGE_Y;
 		bool sel = i == g.stageCursor;
@@ -925,6 +926,44 @@ static void draw_stage_select(void)
 	ui_text("Left/Right: choose    A: start    B: back", 160, 222, 0.42f, HINT, C2D_AlignCenter, false);
 }
 
+static void draw_records(void)
+{
+	const SaveProfile* p = &g_profile;
+	char line[96], t[16];
+	ui_text("Records", 160, 6, 0.8f, GOLD, C2D_AlignCenter, true);
+	snprintf(line, sizeof(line), "Runs %lu    Wins %lu    Bosses %lu", (unsigned long)p->runs, (unsigned long)p->wins,
+	         (unsigned long)p->bossesKilled);
+	ui_text(line, 160, 36, 0.5f, WHITE, C2D_AlignCenter, false);
+	fmt_time(t, sizeof(t), (float)p->totalTime);
+	snprintf(line, sizeof(line), "Kills %lu (best %lu)    Best level %lu    Played %s", (unsigned long)p->totalKills,
+	         (unsigned long)p->bestKills, (unsigned long)p->bestLevel, t);
+	ui_text(line, 160, 54, 0.42f, DIM, C2D_AlignCenter, false);
+	for (int s = 0; s < STAGE_SELECT_COUNT && s < MAX_PROFILE_STAGES; s++) {
+		int last = s;
+		while (g_stages[last].next >= 0) last = g_stages[last].next;
+		if (p->bestWinTime[s]) {
+			fmt_time(t, sizeof(t), (float)p->bestWinTime[s]);
+			snprintf(line, sizeof(line), "%s: won, best %s", g_stages[s].name, t);
+		} else if (p->bestStage[s]) {
+			snprintf(line, sizeof(line), "%s: cleared stage %d of %d", g_stages[s].name, p->bestStage[s], g_stages[last].number);
+		} else {
+			snprintf(line, sizeof(line), "%s: not cleared yet", g_stages[s].name);
+		}
+		ui_text(line, 12, 76 + s * 16, 0.45f, WHITE, 0, false);
+	}
+	// characters with wins
+	ui_text("Wins by character", 12, 130, 0.45f, GOLD, 0, false);
+	int row = 0;
+	for (int c = 0; c < CHARACTER_COUNT && c < MAX_PROFILE_CHARS; c++) {
+		if (!p->charRuns[c]) continue;
+		snprintf(line, sizeof(line), "%s %u/%u", g_characters[c].name, p->charWins[c], p->charRuns[c]);
+		ui_text(line, 12 + (row % 3) * 102, 146 + (row / 3) * 14, 0.38f, DIM, 0, false);
+		if (++row >= 15) break;
+	}
+	if (!row) ui_text("(play a run to start)", 12, 146, 0.38f, DIM, 0, false);
+	ui_text("B: back", 160, 224, 0.5f, HINT, C2D_AlignCenter, false);
+}
+
 static void draw_menu_buttons(const char* const* labels, int n)
 {
 	for (int i = 0; i < n; i++) {
@@ -939,15 +978,21 @@ void draw_bottom(void)
 {
 	switch (g.state) {
 	case STATE_TITLE: {
-		static const char* const labels[] = { "Play", "Exit" };
-		draw_menu_buttons(labels, 2);
-		ui_text("Unofficial fan port. Assets from your own copy.", 160, 200, 0.42f, HINT, C2D_AlignCenter, false);
+		static const char* const withRun[] = { "Continue run", "New run", "Records", "Exit" };
+		static const char* const noRun[] = { "Play", "Records", "Exit" };
+		if (run_save_exists()) draw_menu_buttons(withRun, 4);
+		else draw_menu_buttons(noRun, 3);
+		ui_text("Unofficial fan port. Assets from your own copy.", 160, 4, 0.42f, HINT, C2D_AlignCenter, false);
+		if (g.toastTime > 0) ui_text(g.toast, 160, 36, 0.5f, GOLD, C2D_AlignCenter, false);
 		if (!audio_available())
-			ui_text("No sound: dump DSP firmware (sdmc:/3ds/dspfirm.cdc)", 160, 218, 0.42f, C2D_Color32(220, 120, 120, 255), C2D_AlignCenter, false);
+			ui_text("No sound: dump DSP firmware (sdmc:/3ds/dspfirm.cdc)", 160, 18, 0.42f, C2D_Color32(220, 120, 120, 255), C2D_AlignCenter, false);
 		break;
 	}
 	case STATE_CHARSELECT:
 		draw_char_select();
+		break;
+	case STATE_RECORDS:
+		draw_records();
 		break;
 	case STATE_STAGESELECT:
 		draw_stage_select();
@@ -968,15 +1013,34 @@ void draw_bottom(void)
 		draw_microwave();
 		break;
 	case STATE_PAUSED: {
-		static const char* const labels[] = { "Resume", "Quit run" };
-		draw_menu_buttons(labels, 2);
+		static const char* const labels[] = { "Resume", "Save & quit", "Quit run" };
+		draw_menu_buttons(labels, 3);
 		break;
 	}
-	case STATE_DEAD:
-	case STATE_WIN: {
+	case STATE_WIN:
+		if (STAGE->next >= 0) {
+			const StageDef* n = &g_stages[STAGE->next];
+			char line[96];
+			snprintf(line, sizeof(line), "%s - Stage %d cleared!", STAGE->name, STAGE->number);
+			ui_text(line, 160, 16, 0.8f, GOLD, C2D_AlignCenter, true);
+			snprintf(line, sizeof(line), "Level %d    Kills %d    Gold %d", g.level, g.kills, g.gold);
+			ui_text(line, 160, 48, 0.55f, WHITE, C2D_AlignCenter, false);
+			ui_text("Weapons, tomes, items and stats carry over.", 160, 66, 0.45f, DIM, C2D_AlignCenter, false);
+			char cont[64];
+			snprintf(cont, sizeof(cont), "Continue: Stage %d", n->number);
+			for (int i = 0; i < 2; i++) {
+				float y = UI_BTN_Y0 + 60 + i * UI_BTN_STEP;
+				ui_panel(UI_BTN_X, y, UI_BTN_W, UI_BTN_H, i == 0 ? GOLD : C2D_Color32(90, 90, 110, 255), i == 0 ? PANEL_SEL : PANEL);
+				ui_text(i == 0 ? cont : "End run", 160, y + 8, 0.8f, WHITE, C2D_AlignCenter, true);
+			}
+			ui_text("A: continue    B: end run", 160, 222, 0.5f, C2D_Color32(180, 180, 200, 255), C2D_AlignCenter, false);
+			break;
+		}
+		/* fall through: the run is won */
+	case STATE_DEAD: {
 		ui_text(g.state == STATE_WIN ? "Victory!" : "Game over", 160, 20, 1.2f, GOLD, C2D_AlignCenter, true);
 		char tbuf[16];
-		fmt_time(tbuf, sizeof(tbuf), g.time);
+		fmt_time(tbuf, sizeof(tbuf), g.runTime);
 		char line[96];
 		snprintf(line, sizeof(line), "Time survived: %s", tbuf);
 		ui_text(line, 160, 80, 0.6f, WHITE, C2D_AlignCenter, false);

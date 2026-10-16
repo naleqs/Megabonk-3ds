@@ -133,4 +133,6 @@ typedef struct {
 	int boss;                  // EnemyDef index, -1 if none
 	int propFirst, propCount;  // range in g_propDefs
 	MusicId music, bossMusic;
+	int next;                  // stage a run continues to after the boss, -1 = the run is won
+	int number;                // stage number within a run (1..3)
 } StageDef;

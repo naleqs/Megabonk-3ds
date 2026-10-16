@@ -12,7 +12,7 @@
 #define UI_BTN_W     240
 #define UI_BTN_H     36
 #define UI_BTN_Y0    60
-#define UI_BTN_STEP  52
+#define UI_BTN_STEP  44
 
 // item icon grid (HUD and microwave)
 #define UI_ITEM_X0   8
