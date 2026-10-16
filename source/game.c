@@ -295,33 +295,47 @@ static bool in_pool(int def)
 	return false;
 }
 
-// Next enemy type to join: the cheapest unlocked one not yet in the pool.
+// StageData.checkNewEnemyInterval: every interval one more enemy type joins, picked at random
+// from this stage's enemies (EnemyData.maps) whose canSpawnAfterTime has passed.
 static void pool_add_next(void)
 {
-	int best = -1;
+	int cand[ENEMY_COUNT], n = 0;
 	for (int i = 0; i < ENEMY_COUNT; i++) {
 		const EnemyDef* d = &g_enemyDefs[i];
 		if (d->flags & (ENEMY_NO_RANDOM_SPAWN | ENEMY_MINIBOSS | ENEMY_BOSS)) continue;
 		if (!(d->maps & STAGE->mapBit)) continue;   // only this stage's enemies
 		if (in_pool(i) || d->spawnAfter > g.time) continue;
-		if (best < 0 || d->spawnAfter < g_enemyDefs[best].spawnAfter ||
-		    (d->spawnAfter == g_enemyDefs[best].spawnAfter && d->cost < g_enemyDefs[best].cost))
-			best = i;
+		cand[n++] = i;
 	}
-	if (best >= 0 && g.poolSize < ENEMY_COUNT) g.enemyPool[g.poolSize++] = best;
+	if (n && g.poolSize < ENEMY_COUNT) g.enemyPool[g.poolSize++] = cand[rand() % n];
 }
 
-// newer pool entries are weighted higher, so the mix shifts over the stage
+// newer types are a little more common, so the mix shifts over the stage
 static int pool_pick(void)
 {
 	float total = 0;
-	for (int i = 0; i < g.poolSize; i++) total += 1.0f + i * 0.75f;
+	for (int i = 0; i < g.poolSize; i++) total += 1.0f + i * 0.25f;
 	float r = randf() * total;
 	for (int i = 0; i < g.poolSize; i++) {
-		r -= 1.0f + i * 0.75f;
+		r -= 1.0f + i * 0.25f;
 		if (r <= 0) return g.enemyPool[i];
 	}
 	return g.enemyPool[g.poolSize - 1];
+}
+
+// Final Swarm: ghosts that get stronger the longer you stay (white, then black after
+// 1 minute, purple after 6, red after 12).
+static int final_swarm_enemy(void)
+{
+	static const char* const tiers[] = { "GhostRed", "GhostPurple", "GhostGreater", "Ghost" };
+	static const float after[] = { 720, 360, 60, 0 };
+	float t = g.time - STAGE->stageTime;
+	for (int k = 0; k < 4; k++)
+		if (t >= after[k]) {
+			int def = game_find_enemy_def(tiers[k]);
+			if (def >= 0) return def;
+		}
+	return pool_pick();
 }
 
 static void spawn_group(int def, int count, float minR, float maxR)
@@ -399,7 +413,7 @@ static void director_update(float dt)
 		spawn_group(g.swarmEnemy, 3, 26, 36);   // swarms come in packs on top of the budget
 
 	for (int guard = 0; guard < 2 && g.numEnemies < target; guard++) {
-		int def = pool_pick();
+		int def = g.finalSwarm ? final_swarm_enemy() : pool_pick();
 		float cost = g_enemyDefs[def].cost;
 		int group = 1 + (randf() < 0.25f ? 1 + rand() % 2 : 0);
 		if (g.credits < cost * group) break;

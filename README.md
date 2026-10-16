@@ -49,6 +49,8 @@ and don't upload or share it.
 ## What's in it
 
 - Forest, Desert and Graveyard stages with their props, lighting and enemy timelines from the game data
+  (a new enemy type joins every minute once its spawn time has passed; minibosses and swarms on the
+  game's schedule; the Final Swarm's ghosts turn black, purple and red the longer you stay)
 - All 21 characters with their animations, starting weapons and passive abilities
 - All 30 weapons. Base damage, knockback, crit chance, projectile count, bounces, cooldown and the
   level-up stat lines are read from the game's own weapon data
